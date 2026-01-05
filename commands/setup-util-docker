@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+
+# https://docs.docker.com/engine/install/
+# https://wiki.archlinux.org/title/Docker
+# Fixed for Manjaro/Arch: use pacman instead of get.docker.com (which doesn't support Manjaro)
+
+function setup_util_docker() (
+	source "$DOROTHY/sources/bash.bash"
+	source "$(type -P eval-helper)"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Sets up Docker according to the recommended procedure for your platform.
+
+			USAGE:
+			setup-util-docker
+
+			OPTIONS:
+			--postinstall
+			--debug
+			--check
+		EOF
+		return 22
+	}
+
+	local item action='install' util=()
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--postinstall') action='postinstall' ;;
+		'--debug') action='debug' ;;
+		'--check') action='check' ;;
+		'--install') action='install' ;;
+		'--uninstall') action='uninstall' ;;
+		'--action='*) action="${item#*=}" ;;
+		*) util+=("$item") ;;
+		esac
+	done
+
+	util+=("--action=$action")
+
+	# =====================================
+	# Preparation
+
+	local service_title='Docker'
+	local service_app='Docker'
+	local service_ids=(
+		'containerd'
+		'docker.socket'
+		'docker'
+	)
+	__prepare_current_user
+	local service_user="$CURRENT_USER"
+	local service_group='docker'
+	local service_config_paths=(
+		"$HOME/.docker"
+	)
+
+	# =====================================
+	# Helper Functions
+
+	function __check_group {
+		is-group -- "$service_group"
+	}
+	function __check_user_in_group {
+		is-user-in-group --user="$service_user" --group="$service_group"
+	}
+	function __check_docker_exists {
+		__command_exists -- docker
+	}
+
+	function install_user_group {
+		if ! __check_group; then
+			eval-helper --elevate -- groupadd "$service_group"
+		fi
+		if ! __check_user_in_group; then
+			eval-helper --elevate -- gpasswd -a "$service_user" "$service_group"
+		fi
+	}
+
+	function add_permissions_to_config {
+		__mkdirp "${service_config_paths[@]}"
+		fs-own --user="$service_user" --group="$service_group" --permissions='g+Xrw' --recursive -- "${service_config_paths[@]}"
+	}
+
+	function restart_docker {
+		service-helper --disable --stop -- docker docker.socket containerd || :
+		sleep 3
+		service-helper --enable --start -- containerd docker.socket docker || :
+		sleep 3
+		service-helper --status --running -- containerd docker.socket docker
+	}
+
+	function run_checks {
+		eval_helper --verbose --wrap --shapeshifter \
+			--pending="$(__print_style --bold="Testing hello-world container...")" \
+			--success="$(__print_style --success="Verified hello-world.")" \
+			--failure="$(__print_style --error="Failed to verify hello-world.")" -- \
+			docker run --rm hello-world
+	}
+
+	function do_checks {
+		local check_status
+		__try {check_status} -- \
+			eval_helper --quiet --no-wrap --shapeshifter \
+			--pending="$(__print_style --bold="Testing $service_title...")" \
+			--success="$(__print_style --success="$service_title is working.")" \
+			--failure="$(__print_style --error="Failed to verify docker works.")" -- \
+			run_checks
+		if [[ $check_status -ne 0 ]]; then
+			__print_style --notice='Debug with:' ' ' --code='setup-util-docker --debug'
+			return "$check_status"
+		fi
+	}
+
+	function run_postinstall {
+		eval_helper --quiet --no-wrap --shapeshifter \
+			--pending="$(__print_style --bold="Correcting permissions...")" \
+			--success="$(__print_style --success="Corrected permissions.")" \
+			--failure="$(__print_style --error="Failed to correct permissions.")" -- \
+			add_permissions_to_config
+
+		if is-linux; then
+			eval_helper --quiet --no-wrap --shapeshifter \
+				--pending="$(__print_style --bold="Restarting $service_title...")" \
+				--success="$(__print_style --success="Restarted $service_title.")" \
+				--failure="$(__print_style --error="Failed to restart $service_title.")" -- \
+				restart_docker
+		fi
+
+		do_checks
+	}
+
+	# =====================================
+	# Actions
+
+	if [[ $action == 'postinstall' ]]; then
+		run_postinstall
+		return
+	elif [[ $action == 'check' ]]; then
+		do_checks
+		return
+	fi
+
+	# =====================================
+	# Installation
+
+	if is-mac; then
+		setup-util "${util[@]}" --app="$service_app" CASK='docker'
+		while __command_missing -- docker; do
+			__print_style --newline \
+				--code='docker' --dim=' command not found' --newline \
+				--notice="Continue installation via the $service_app app..."
+			open "$(get-app -- "$service_app")"
+			confirm --ppid=$$ -- "Press <enter> once $service_app has finished installing..."
+		done
+		do_checks
+
+	elif is-linux; then
+		if [[ $action == 'uninstall' ]]; then
+			# Uninstall docker packages
+			if is-arch; then
+				eval-helper --elevate -- pacman -Rs --noconfirm docker docker-compose docker-buildx || :
+			fi
+			service-helper --remove -- "${service_ids[@]}" || :
+			return 0
+		fi
+
+		# Install
+		if __check_docker_exists && __check_group && __check_user_in_group; then
+			__print_style --success="$service_title already installed."
+		else
+			# For Arch/Manjaro, use pacman directly
+			if is-arch; then
+				__print_style --bold="Installing Docker via pacman..."
+				eval-helper --elevate -- pacman -Sy --noconfirm --needed docker docker-compose docker-buildx
+
+				# Setup group
+				install_user_group
+
+				# Enable and start services
+				eval-helper --elevate -- systemctl enable docker.socket
+				eval-helper --elevate -- systemctl start docker.socket
+
+				__print_style --success="Docker installed."
+				__print_style --notice='You may need to log out and back in for group changes to take effect.'
+				__print_style --notice='Or run: ' --code='newgrp docker'
+			else
+				# For other distros, use the convenience script
+				__print_style --bold="Installing Docker via get.docker.com..."
+				(
+					set +Eeu
+					eval "$(fetch https://get.docker.com)"
+				)
+				install_user_group
+			fi
+
+			# Run postinstall
+			run_postinstall || :
+		fi
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_docker "$@"
+fi

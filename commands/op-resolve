@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# op-resolve - Resolve an op:// reference to its actual value
+# Usage: op-resolve "op://vault/item/field"
+#    or: op-resolve VARNAME (will read value from $VARNAME)
+
+set -euo pipefail
+
+input="$1"
+
+# If input doesn't contain op://, check if it's a variable name
+if [[ "$input" != op://* ]]; then
+    # Try to get value from environment variable
+    input="${!input:-}"
+fi
+
+# If still not an op:// reference, output original and exit
+if [[ "$input" != op://* ]]; then
+    echo "$input"
+    exit 0
+fi
+
+# Parse op://vault/item/field format
+item_name=$(echo "$input" | cut -d'/' -f4)
+
+if [[ -z "$item_name" ]]; then
+    echo "Error: Could not parse item name from $input" >&2
+    exit 1
+fi
+
+# Retrieve from 1Password
+op item get "$item_name" --reveal --format json --fields type=concealed | jq -r '.value'

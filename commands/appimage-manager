@@ -1,0 +1,474 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# appimage-manager.sh
+# Per-user AppImage manager for Arch/Manjaro (KDE & GNOME friendly)
+# - Installs/uninstalls a local AppImage
+# - Extracts it into ~/Applications/[AppName]
+# - Creates a desktop file in ~/.local/share/applications
+# No sudo required. This script operates entirely within $HOME.
+#
+# Copyright 2025 Mike Crowe (drmikecrowe)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# PRIME DIRECTIVE: correctness first, then cleanliness.
+# Design: Small, focused functions; fail fast; no scope creep beyond requested features.
+
+VERSION="0.1.0"
+
+# Globals
+HOME_APPS_DIR="${HOME}/Applications"
+LOCAL_APPS_DIR="${HOME}/.local/share/applications"
+LOCAL_ICON_DIR="${HOME}/.local/share/icons/hicolor"
+META_KEY="X-AppImage-Manager"
+META_VALUE="appimage-manager"
+
+usage() {
+  cat <<EOF
+AppImage Extract Installer v${VERSION}
+
+Usage:
+  $0 install <path-to.AppImage> [--name NAME] [--exec-args "ARGS"]
+  $0 uninstall <NAME>
+  $0 list
+  $0 help
+
+Features:
+- Idempotent: Installing newer versions updates existing installations
+- Uses internal app name for consistent identification across versions
+- Robust extraction with multiple fallback methods
+- Per-user only; no sudo required
+
+Notes:
+- Installs into: ${HOME_APPS_DIR}/[NAME]
+- Desktop file: ${LOCAL_APPS_DIR}/[desktop-id].desktop
+- Names prioritized: internal name > --name flag > filename
+EOF
+}
+
+log() { printf "%s\n" "$*"; }
+err() { printf "Error: %s\n" "$*" 1>&2; }
+
+die() { err "$*"; exit 1; }
+has_cmd() { command -v "$1" > /dev/null 2>&1; }
+
+cleanup_extraction() {
+  local tmpdir="${1:-}"
+  [[ -n "$tmpdir" && -d "$tmpdir" ]] && rm -rf "$tmpdir" || true
+}
+
+require_file() {
+  local f="$1"
+  [[ -f "$f" ]] || die "File not found: $f"
+}
+
+sanitize_id() {
+  # Convert a free-form name to a safe ID (lowercase, alnum+dash)
+  local in="$1"
+  local out
+  out=$(printf "%s" "$in" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g; s/-+/-/g')
+  printf "%s" "$out"
+}
+
+ensure_dirs() {
+  mkdir -p "$HOME_APPS_DIR" "$LOCAL_APPS_DIR" "$LOCAL_ICON_DIR"
+}
+
+pick_largest_icon() {
+  # Args: extracted_root output_path
+  local root="$1"; shift
+  local out="$1"; shift
+
+  # Prefer SVG, then largest PNG
+  local cand
+  cand=$(find "$root" -type f \( -iname '*.svg' -o -iname '*256*.png' -o -iname '*128*.png' -o -iname '*.png' \) 2>/dev/null \
+      | grep -E '/(share/icons|share/pixmaps|usr/share/icons|usr/share/pixmaps)/' -i \
+      | head -n 1)
+  if [[ -z "${cand:-}" ]]; then
+    cand=$(find "$root" -type f -iname '*.svg' -o -iname '*.png' 2>/dev/null | head -n 1)
+  fi
+  if [[ -n "${cand:-}" ]]; then
+    cp -f -- "$cand" "$out"
+    return 0
+  fi
+  return 1
+}
+
+extract_appimage() {
+  # Extract into a temp dir and print the path to extraction root
+  # Path is printed to stdout: <tmp>/squashfs-root
+  local appimage="$1"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  # Attempt native extraction via AppImage runtime
+  if ( cd "$tmpdir" && "$appimage" --appimage-extract > /dev/null 2>&1 ); then
+    printf "%s/squashfs-root" "$tmpdir"
+    return 0
+  fi
+
+  # Fallback: try extracting SquashFS by detecting offset and using unsquashfs
+  if has_cmd unsquashfs; then
+    # Find the first occurrence of the SquashFS magic 'hsqs' and use its byte offset
+    local offset
+    offset=$(LC_ALL=C grep -aob -- 'hsqs' "$appimage" | head -n1 | cut -d: -f1 || true)
+    if [[ -n "${offset:-}" ]]; then
+      if ( cd "$tmpdir" && unsquashfs -o "$offset" -d squashfs-root "$appimage" > /dev/null 2>&1 ); then
+        printf "%s/squashfs-root" "$tmpdir"
+        return 0
+      fi
+    fi
+  fi
+
+  # Enhanced fallback: use binwalk + manual extraction for stubborn AppImages
+  if has_cmd binwalk && has_cmd unsquashfs; then
+    log "Trying enhanced extraction with binwalk analysis..." >&2
+    local binwalk_output squashfs_offset
+    binwalk_output=$(binwalk "$appimage" 2>/dev/null | grep -i "squashfs" | head -n1 || true)
+    if [[ -n "${binwalk_output:-}" ]]; then
+      squashfs_offset=$(printf "%s" "$binwalk_output" | awk '{print $1}' || true)
+      if [[ -n "${squashfs_offset:-}" && "$squashfs_offset" =~ ^[0-9]+$ ]]; then
+        # Extract SquashFS using tail for efficiency
+        local squashfs_file="${tmpdir}/extracted.squashfs"
+        if tail -c +$((squashfs_offset + 1)) "$appimage" > "$squashfs_file" 2>/dev/null; then
+          if ( cd "$tmpdir" && unsquashfs -d squashfs-root "$squashfs_file" > /dev/null 2>&1 ); then
+            printf "%s/squashfs-root" "$tmpdir"
+            return 0
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Final fallback: manual SquashFS magic detection with tail extraction
+  if has_cmd unsquashfs; then
+    log "Trying manual SquashFS detection..." >&2
+    # Look for SquashFS magic bytes pattern more robustly
+    local magic_offset
+    magic_offset=$(hexdump -C "$appimage" | grep -E "(68 73 71 73|73 71 73 68)" | head -n1 | cut -d' ' -f1 || true)
+    if [[ -n "${magic_offset:-}" ]]; then
+      # Convert hex offset to decimal
+      local decimal_offset
+      decimal_offset=$((16#${magic_offset}))
+      if [[ "$decimal_offset" -gt 0 ]]; then
+        local squashfs_file="${tmpdir}/manual_extracted.squashfs"
+        if tail -c +$((decimal_offset + 1)) "$appimage" > "$squashfs_file" 2>/dev/null; then
+          if ( cd "$tmpdir" && unsquashfs -d squashfs-root "$squashfs_file" > /dev/null 2>&1 ); then
+            printf "%s/squashfs-root" "$tmpdir"
+            return 0
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # Cleanup and helpful guidance
+  rm -rf "$tmpdir" || true
+  die "Failed to extract AppImage. On Arch/Manjaro, install 'fuse2' to enable AppImage runtime, 'squashfs-tools' for fallback extraction, and 'binwalk' for enhanced analysis. Also ensure the AppImage is executable (chmod +x)."
+}
+
+read_internal_desktop() {
+  # Args: extracted_root
+  # Prints path to first .desktop inside, if any
+  local root="$1"
+  local d
+  d=$(find "$root" -maxdepth 2 -type f -name '*.desktop' | head -n 1 || true)
+  [[ -n "${d:-}" ]] && printf "%s" "$d"
+}
+
+parse_desktop_key() {
+  # Args: desktop_file key
+  # Prints value for key in the first group (unlocalized)
+  local df="$1" key="$2"
+  awk -F= -v key="$key" 'tolower($1)==tolower(key){print $2; exit}' "$df"
+}
+
+make_desktop_file() {
+  # Args: name id exec_path icon_path
+  local name="$1" id="$2" exec_path="$3" icon_path="$4"
+  local desktop_id="${id}.desktop"
+  local desktop_path="${LOCAL_APPS_DIR}/${desktop_id}"
+  cat >"$desktop_path" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=${name}
+Exec="${exec_path}" %u
+Icon=${icon_path}
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+${META_KEY}=${META_VALUE}
+X-AppImage-Name=${name}
+X-AppImage-InstallDir=${HOME_APPS_DIR}/${id}
+DESKTOP
+  printf "%s" "$desktop_path"
+}
+
+force_menu_refresh() {
+  command -v xdg-desktop-menu >/dev/null 2>&1 && xdg-desktop-menu forceupdate || true
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "${HOME}/.local/share/applications" >/dev/null 2>&1 || true
+  # KDE sometimes needs kbuildsycoca5
+  command -v kbuildsycoca5 >/dev/null 2>&1 && kbuildsycoca5 >/dev/null 2>&1 || true
+}
+
+install_cmd() {
+  local src="${1:-}"
+  shift || true
+  [[ -n "${src:-}" ]] || die "Usage: install <path-to.AppImage> [--name NAME] [--exec-args \"ARGS\"]"
+  require_file "$src"
+
+  local opt_name="" opt_exec_args=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) opt_name="$2"; shift 2 ;;
+      --exec-args) opt_exec_args="$2"; shift 2 ;;
+      *) err "Unknown option: $1"; exit 2 ;;
+    esac
+  done
+
+  ensure_dirs
+
+  # Ensure executable bit on source (needed for --appimage-extract)
+  chmod +x -- "$src" || true
+
+  # Extract to read metadata
+  log "Extracting AppImage metadata..."
+  local root
+  root=$(extract_appimage "$src")
+  if [[ -n "${root:-}" ]]; then
+    EXTRACTION_TMPDIR=$(dirname "$root")
+    trap 'cleanup_extraction "$EXTRACTION_TMPDIR"' EXIT
+  fi
+
+  local internal_desktop name_from_inside icon_key
+  internal_desktop=$(read_internal_desktop "$root" || true)
+  if [[ -n "${internal_desktop:-}" ]]; then
+    name_from_inside=$(parse_desktop_key "$internal_desktop" Name || true)
+    icon_key=$(parse_desktop_key "$internal_desktop" Icon || true)
+  fi
+
+  local base_name
+  base_name=$(basename -- "$src")
+  base_name=${base_name%.AppImage}
+  base_name=${base_name%.appimage}
+
+  # Determine app name with idempotent priority: internal name > --name flag > filename
+  # This ensures same app always gets same ID regardless of filename variations
+  local app_name
+  if [[ -n "${name_from_inside:-}" ]]; then
+    app_name="$name_from_inside"
+    log "Using internal app name: $app_name"
+  elif [[ -n "${opt_name:-}" ]]; then
+    app_name="$opt_name"
+    log "Using provided name: $app_name"
+  else
+    app_name="$base_name"
+    log "Using filename-based name: $app_name"
+  fi
+
+  local app_id
+  app_id=$(sanitize_id "$app_name")
+  [[ -n "$app_id" ]] || die "Failed to derive a valid application ID."
+
+  local app_dir="${HOME_APPS_DIR}/${app_id}"
+  local is_update=false
+  if [[ -e "$app_dir" ]]; then
+    log "Found existing installation at: $app_dir"
+    log "Updating existing installation..."
+    is_update=true
+    # Backup old AppImage before replacing
+    if [[ -f "${app_dir}/${app_id}.AppImage" ]]; then
+      mv "${app_dir}/${app_id}.AppImage" "${app_dir}/${app_id}.AppImage.backup" 2>/dev/null || true
+    fi
+  else
+    mkdir -p "$app_dir" || die "Unable to create $app_dir"
+  fi
+
+  # Copy original AppImage
+  local appimage_path="${app_dir}/${app_id}.AppImage"
+  cp -f -- "$src" "$appimage_path"
+  chmod +x -- "$appimage_path"
+
+  # Save extracted payload (optional but requested) under app_dir/extracted
+  log "Saving extracted contents..."
+  mkdir -p "${app_dir}/extracted"
+  if has_cmd rsync; then
+    rsync -a --delete "${root}/" "${app_dir}/extracted/" 2>/dev/null || cp -a "${root}/." "${app_dir}/extracted/"
+  else
+    cp -a "${root}/." "${app_dir}/extracted/"
+  fi
+
+  # Choose icon to install locally
+  local chosen_icon_ext="png" chosen_icon_path="${app_dir}/icon"
+  if pick_largest_icon "${app_dir}/extracted" "${app_dir}/icon"; then
+    if has_cmd file && file -b --mime-type "${app_dir}/icon" | grep -q svg; then
+      chosen_icon_ext="svg"
+    else
+      chosen_icon_ext="png"
+    fi
+  else
+    # Fall back: if .desktop Icon=PATH exists
+    if [[ -n "${icon_key:-}" ]]; then
+      # If icon_key looks like a path within extraction, try to copy
+      if [[ -f "${app_dir}/extracted/${icon_key}" ]]; then
+        cp -f "${app_dir}/extracted/${icon_key}" "${app_dir}/icon"
+        if has_cmd file && file -b --mime-type "${app_dir}/icon" | grep -q svg; then chosen_icon_ext="svg"; else chosen_icon_ext="png"; fi
+      fi
+    fi
+  fi
+
+  # Install icon into local theme cache path
+  local icon_dest_dir
+  if [[ "$chosen_icon_ext" == "svg" ]]; then
+    icon_dest_dir="${LOCAL_ICON_DIR}/scalable/apps"
+  else
+    icon_dest_dir="${LOCAL_ICON_DIR}/256x256/apps"
+  fi
+  mkdir -p "$icon_dest_dir"
+  local icon_target="${icon_dest_dir}/${app_id}.${chosen_icon_ext}"
+  if [[ -f "${app_dir}/icon" ]]; then
+    cp -f "${app_dir}/icon" "$icon_target"
+  else
+    # No icon found; desktop will reference the AppImage itself which often embeds an icon
+    icon_target="${appimage_path}"
+  fi
+
+  # Find the main executable in extracted contents (AppRun or from .desktop file)
+  local main_executable=""
+  if [[ -f "${app_dir}/extracted/AppRun" ]]; then
+    main_executable="${app_dir}/extracted/AppRun"
+    chmod +x "$main_executable" 2>/dev/null || true
+  elif [[ -n "${internal_desktop:-}" ]]; then
+    # Try to find the executable specified in the internal desktop file
+    local desktop_exec
+    desktop_exec=$(parse_desktop_key "$internal_desktop" Exec || true)
+    if [[ -n "${desktop_exec:-}" ]]; then
+      # Extract just the executable name (remove arguments)
+      desktop_exec=$(printf "%s" "$desktop_exec" | awk '{print $1}')
+      if [[ -f "${app_dir}/extracted/$desktop_exec" ]]; then
+        main_executable="${app_dir}/extracted/$desktop_exec"
+        chmod +x "$main_executable" 2>/dev/null || true
+      elif [[ -f "${app_dir}/extracted/usr/bin/$desktop_exec" ]]; then
+        main_executable="${app_dir}/extracted/usr/bin/$desktop_exec"
+        chmod +x "$main_executable" 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  # Build Exec line; prefer extracted executable, fallback to AppImage
+  local exec_path
+  if [[ -n "$main_executable" && -x "$main_executable" ]]; then
+    exec_path="$main_executable"
+    log "Using extracted executable: $(basename "$main_executable")"
+  else
+    exec_path="$appimage_path"
+    log "Warning: Could not find extracted executable, using AppImage directly"
+  fi
+  
+  if [[ -n "${opt_exec_args:-}" ]]; then
+    exec_path+=" ${opt_exec_args}"
+  fi
+
+  # Create desktop file
+  log "Creating desktop entry..."
+  local desktop_path
+  desktop_path=$(make_desktop_file "$app_name" "$app_id" "$exec_path" "$icon_target")
+
+  # Mark desktop file for our manager and index for uninstall
+  printf "%s\n" "${META_KEY}=${META_VALUE}" > "${app_dir}/.appimage-manager-meta"
+  printf "%s\n" "Desktop=${desktop_path}" >> "${app_dir}/.appimage-manager-meta"
+
+  # Refresh menus
+  force_menu_refresh
+
+  # Clean up backup file after successful installation
+  if [[ "$is_update" == "true" && -f "${app_dir}/${app_id}.AppImage.backup" ]]; then
+    rm -f "${app_dir}/${app_id}.AppImage.backup"
+    log "Updated: ${app_name}"
+    log "- Previous version replaced"
+  else
+    log "Installed: ${app_name}"
+  fi
+  log "- App dir: ${app_dir}"
+  log "- Desktop: ${desktop_path}"
+}
+
+uninstall_cmd() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "Usage: uninstall <NAME>"
+  ensure_dirs
+  local app_id
+  app_id=$(sanitize_id "$name")
+  local app_dir="${HOME_APPS_DIR}/${app_id}"
+  [[ -d "$app_dir" ]] || die "Not installed: ${name} (${app_dir} not found)"
+
+  # Read the desktop path if we recorded it
+  local desktop_path
+  if [[ -f "${app_dir}/.appimage-manager-meta" ]]; then
+    desktop_path=$(awk -F= '/^Desktop=/{print $2}' "${app_dir}/.appimage-manager-meta" || true)
+  fi
+
+  # Remove desktop file(s) that match our ID or our META tag
+  if [[ -n "${desktop_path:-}" && -f "$desktop_path" ]]; then
+    rm -f -- "$desktop_path"
+  else
+    # Fallback: remove any desktop files we created for this id
+    find "$LOCAL_APPS_DIR" -maxdepth 1 -type f -name "${app_id}.desktop" -delete || true
+    # Or tagged ones
+    grep -rl "^${META_KEY}=${META_VALUE}$" "$LOCAL_APPS_DIR" 2>/dev/null | xargs -r rm -f --
+  fi
+
+  # Remove icons
+  find "$LOCAL_ICON_DIR" -type f \( -name "${app_id}.png" -o -name "${app_id}.svg" \) -delete || true
+
+  # Remove app dir
+  rm -rf -- "$app_dir"
+
+  # Refresh menus
+  force_menu_refresh
+
+  log "Uninstalled: ${name}"
+}
+
+list_cmd() {
+  ensure_dirs
+  local d
+  shopt -s nullglob
+  for d in "${HOME_APPS_DIR}"/*; do
+    [[ -d "$d" ]] || continue
+    local id
+    id=$(basename -- "$d")
+    local name="$id"
+    if [[ -f "${d}/.appimage-manager-meta" ]]; then
+      : # Keep default name
+    fi
+    printf "%s\n" "$name"
+  done
+}
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    install) install_cmd "$@" ;;
+    uninstall) uninstall_cmd "$@" ;;
+    list) list_cmd ;; 
+    help|--help|-h|"") usage ;;
+    --version|-v) printf "%s\n" "$VERSION" ;;
+    *) die "Unknown command: $cmd (try: help)" ;;
+  esac
+}
+
+main "$@"
+

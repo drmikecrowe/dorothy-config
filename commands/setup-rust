@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Custom setup-rust - Rust tools managed via pyinfra/pacman instead
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_rust() (
+    # Load config to check if anything needs installing
+    source "$DOROTHY/sources/config.sh"
+    local CARGO_INSTALL=()
+    load_dorothy_config 'setup.bash'
+
+    if [[ ${#CARGO_INSTALL[@]} -eq 0 ]]; then
+        echo-style --dim="Setup of Rust ecosystem skipped (tools managed via pyinfra/pacman)."
+        return 0
+    fi
+
+    # If there are packages, call the original
+    "$DOROTHY/commands/setup-rust" "$@"
+)
+
+setup_rust "$@"

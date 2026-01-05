@@ -1,0 +1,30 @@
+#!/bin/bash
+
+echo "📦 Managing Node.js global packages..."
+
+# Get current Node.js version info
+NODE_VERSION=$(mise current node 2>/dev/null || echo "not managed by mise")
+echo "Using Node.js version: $NODE_VERSION"
+
+# Install/update global packages from default packages file
+if [ -f ~/.default-node-packages ]; then
+    echo "📋 Installing packages from ~/.default-node-packages..."
+
+    # Read all packages into a single command
+    packages=$(grep -v '^[[:space:]]*$' ~/.default-node-packages | grep -v '^[[:space:]]*#' | tr '\n' ' ')
+
+    if [ -n "$packages" ]; then
+        echo "Installing: $packages"
+        mise exec node -- npm install -g --force $packages
+    else
+        echo "No packages found in ~/.default-node-packages"
+    fi
+else
+    echo "⚠️  ~/.default-node-packages not found"
+    echo "Creating default file with current packages..."
+
+    # Fallback: install the packages directly if file doesn't exist
+    mise exec node -- npm i -g --force typescript ts-node syncpack quicktype prettier pnpm npm markdownlint-cli2 json2yaml depcheck @pulumi/pulumi @google/gemini-cli @himorishige/hatago-mcp-hub @pinkpixel/taskflow-mcp @probelabs/probe@latest jsonsort
+fi
+
+echo "✅ Node.js global package management complete!"

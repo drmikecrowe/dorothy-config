@@ -1,0 +1,4 @@
+#!/bin/bash
+CMD="$1"
+shift
+aws-sso -S pinnacle "$CMD" -p pinnacle-root "$@"

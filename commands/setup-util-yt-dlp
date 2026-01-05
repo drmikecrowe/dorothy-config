@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+# https://github.com/yt-dlp/yt-dlp
+# Fixed for Arch: use PACMAN instead of trying to uninstall/reinstall via AUR
+
+function setup_util_yt_dlp() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup - just use pacman on Arch, download on others
+	local arch options=(
+		--name='yt-dlp'
+		--cli='yt-dlp'
+		"$@"
+		PACMAN='yt-dlp'  # ARCH (extra repo)
+		APT_REPO='ppa:yt-dlp/stable'
+		APT='yt-dlp'     # UBUNTU
+		BREW='yt-dlp'
+		CHOCO='yt-dlp'
+		PKG='yt-dlp'
+		PORT='yt-dlp'
+		SCOOP='yt-dlp'
+		WINGET='yt-dlp'
+	)
+
+	# Add download option for non-package-manager systems
+	function __get_github_asset_url {
+		local regexp
+		regexp="^$(echo-escape-regexp -- "$1")$" || return
+		github-download --dry --slug='yt-dlp/yt-dlp' --latest --asset-regexp="$regexp" | echo-first-line || return
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return
+		options+=(DOWNLOAD="$url")
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		__add_download_option 'yt-dlp_macos' || :
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option 'yt-dlp_linux_aarch64' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_download_option 'yt-dlp_linux_armv7l' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option 'yt-dlp_linux' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option 'yt-dlp.exe' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option 'yt-dlp_x86.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_yt_dlp "$@"
+fi

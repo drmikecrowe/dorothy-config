@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: ./sync-claude-to-copilot.sh [project_root]
+# Defaults to current directory if no argument is given.
+
+ROOT="${1:-$(pwd)}"
+CLAUDE_DIR="$ROOT/.claude/commands"
+COPILOT_PROMPTS_DIR="$ROOT/.github/prompts"
+
+if [[ ! -d "$CLAUDE_DIR" ]]; then
+  echo "No .claude/commands directory found at: $CLAUDE_DIR" >&2
+  exit 1
+fi
+
+mkdir -p "$COPILOT_PROMPTS_DIR"
+
+# Copy every .md file from .claude/commands to .github/prompts,
+# preserving subdirectories and renaming *.md -> *.prompt.md
+cd "$CLAUDE_DIR"
+
+find . -type f -name '*.md' | while read -r rel; do
+  src="$CLAUDE_DIR/$rel"
+  # strip leading ./ from find
+  clean_rel="${rel#./}"
+
+  # change extension from .md to .prompt.md
+  base_no_ext="${clean_rel%.md}"
+  dest_rel="${base_no_ext}.prompt.md"
+
+  dest="$COPILOT_PROMPTS_DIR/$dest_rel"
+  dest_dir="$(dirname "$dest")"
+
+  mkdir -p "$dest_dir"
+  echo "Syncing: $src -> $dest"
+  cp "$src" "$dest"
+done
+
+echo "Done. Copilot prompt files are in: $COPILOT_PROMPTS_DIR"
+

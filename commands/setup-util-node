@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+
+# Override core setup-util-node to skip NVM installation
+# User prefers mise for Node.js version management
+
+function setup_util_node() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=node "$@"; then
+		return 0
+	fi
+
+	# enable EVAL_INSTALL, etc
+	source "$(type -P setup-util)"
+
+	# =====================================
+	# Helpers
+
+	function upgrade_system_npm {
+		# On Arch/Manjaro, npm is updated via pacman as part of nodejs/nodejs-lts packages
+		# Skip npm self-upgrade to avoid conflicts
+		if command-exists pacman; then
+			__print_style --dim='npm upgraded via pacman (skipped self-upgrade)'
+			return 0
+		fi
+
+		# For other systems, upgrade npm via npm
+		local cache_dir
+		cache_dir="$(npm config get cache || :)"
+		if [[ -n $cache_dir && ! -d $cache_dir ]]; then
+			__mkdirp "$cache_dir" || {
+				__print_style --notice='Unconfiguring the invalid cache directory:' ' ' --code="$cache_dir" || return
+				npm config delete cache || return
+			} || return
+		fi
+
+		__print_style --dim="Before: v$(npm --version)"
+		setup-util --name='npm' --upgrade --force --quiet \
+			NPM='npm' || __print_style --notice='You can ignore the npm upgrade failure.'
+		npm cache clean --force 2>/dev/null
+		__print_lines "After:  v$(npm --version)"
+	}
+
+	function install_system_node {
+		# Install Node.js via system package manager
+		__print_style --h2='Install Node.js via System'
+		setup-util --name='Node.js via System' --cli=node "$@" \
+			APK='nodejs' APK='npm' \
+			APT_KEY='https://deb.nodesource.com/gpgkey/nodesource.gpg.key' \
+			APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://deb.nodesource.com/node_20.x {RELEASE} main' \
+			APT='nodejs' \
+			AUR='nodejs' AUR='npm' \
+			BREW='node' \
+			BSD='nodejs' \
+			CHOCO='nodejs.install' \
+			EMERGE='nodejs' \
+			EOPKG='nodejs' \
+			RPM='nodejs' \
+			SCOOP='nodejs' \
+			SNAP='node --classic' \
+			WINGET='OpenJS.NodeJS' \
+			XBPS='nodejs' \
+			ZYPPER='nodejs'
+		__print_lines "Installed: $(node --version)"
+		__print_style --g2='Install Node.js via System'
+	}
+
+	# =====================================
+	# Actions
+
+	function node_install {
+		install_system_node --install --force --quiet
+
+		# Upgrade npm
+		__print_style --h3='Upgrade npm'
+		upgrade_system_npm
+		__print_style --g3='Upgrade npm'
+	}
+
+	function node_upgrade {
+		node_install
+	}
+
+	function node_uninstall {
+		setup-util --name='Node.js via System' --cli=node "$@" \
+			APK='nodejs' APK='npm' \
+			APT='nodejs' \
+			AUR='nodejs' AUR='npm' \
+			BREW='node' \
+			BSD='nodejs' \
+			CHOCO='nodejs.install' \
+			EMERGE='nodejs' \
+			EOPKG='nodejs' \
+			RPM='nodejs' \
+			SCOOP='nodejs' \
+			SNAP='node --classic' \
+			WINGET='OpenJS.NodeJS' \
+			XBPS='nodejs' \
+			ZYPPER='nodejs' \
+			--uninstall
+	}
+
+	# setup
+	local options=(
+		--cli='node'
+		"$@"
+		EVAL_INSTALL='node_install'
+		EVAL_UPGRADE='node_upgrade'
+		EVAL_UNINSTALL='node_uninstall'
+	)
+	setup_util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_node "$@"
+fi

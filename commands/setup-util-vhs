@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+# https://github.com/charmbracelet/vhs#installation
+# Fixed: typo get_github_asset_url -> __get_github_asset_url, added PACMAN
+
+function setup_util_vhs() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# improve performance for detectable utilities with conditional assets
+	if setup-util --check --cli=vhs "$@"; then
+		return 0
+	fi
+
+	# setup
+	local arch options=(
+		--cli='vhs'
+		"$@"
+		PACMAN='vhs'  # ARCH (extra repo)
+		AUR='vhs'     # ARCH AUR
+		APT_KEY='https://repo.charm.sh/apt/gpg.key'
+		APT_REPO='deb [arch={ARCH} signed-by={KEY}] https://repo.charm.sh/apt/ * *'
+		GO='github.com/charmbracelet/vhs'
+		NIX='vhs'
+		PORT='vhs'
+		SCOOP='vhs'
+		XBPS='vhs'    # VOID
+	)
+	function __get_github_asset_url {
+		local regexp
+		regexp="$(echo-escape-regexp -- "$1")$" || return
+		github-download --dry --slug='charmbracelet/vhs' --latest --asset-regexp="$regexp" | echo-first-line || return
+	}
+	function __add_download_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return
+		options+=(
+			DOWNLOAD="$url"
+			DOWNLOAD_ARCHIVE_GLOB="$2"
+		)
+	}
+	function __add_apk_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return
+		options+=(
+			APK="$url"
+		)
+	}
+	function __add_deb_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return
+		options+=(
+			DEB="$url"
+		)
+	}
+	function __add_rpm_option {
+		local url
+		url="$(__get_github_asset_url "$1")" || return
+		options+=(
+			RPM="$url"
+		)
+	}
+	arch="$(get-arch)"
+	if is-mac; then
+		if [[ $arch == 'a64' ]]; then
+			__add_download_option '_Darwin_arm64.tar.gz' 'vhs' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_download_option '_Darwin_x86_64.tar.gz' 'vhs' || :
+		fi
+	elif is-linux; then
+		if [[ $arch == 'a64' ]]; then
+			__add_apk_option '_aarch64.apk' || :
+			__add_deb_option '_arm64.deb' || :
+			__add_rpm_option '.aarch64.rpm' || :
+			__add_download_option '_Linux_arm64.tar.gz' 'vhs' || :
+		elif [[ $arch == 'a32' ]]; then
+			__add_apk_option '_armv7.apk' || :
+			__add_deb_option '_armhf.deb' || :
+			__add_rpm_option '.armv7hl.rpm' || :
+			__add_download_option '_Linux_arm.tar.gz' 'vhs' || :
+		elif [[ $arch == 'x64' ]]; then
+			__add_apk_option '_x86_64.apk' || :
+			__add_deb_option '_amd64.deb' || :
+			__add_rpm_option '.x86_64.rpm' || :
+			__add_download_option '_Linux_x86_64.tar.gz' 'vhs' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_apk_option '_x86.apk' || :
+			__add_deb_option '_i386.deb' || :
+			__add_rpm_option '.i386.rpm' || :
+			__add_download_option '_Linux_i386.tar.gz' 'vhs' || :
+		fi
+	elif is-windows; then
+		if [[ $arch == 'x64' ]]; then
+			__add_download_option '_Windows_x86_64.zip' 'vhs.exe' || :
+		elif [[ $arch == 'x32' ]]; then
+			__add_download_option '_Windows_i386.zip' 'vhs.exe' || :
+		fi
+	fi
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_vhs "$@"
+fi

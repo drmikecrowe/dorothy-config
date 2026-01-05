@@ -1,0 +1,45 @@
+Screen {
+    align: center middle;
+}
+
+SelectionList {
+    padding: 1;
+    border: solid $accent;
+    width: 80%;
+    height: 80%;
+}
+
+#main-container {
+    height: 100%;
+    width: 100%;
+}
+
+#selection-container {
+    height: 1fr;
+    width: 100%;
+    height: 80%;
+}
+
+#buttons-container {
+    height: 3;
+    width: 100%;
+    align: right middle;
+    padding-right: 1;
+}
+
+Button {
+    margin-left: 1;
+}
+
+#selection {
+    width: 1fr;
+    height: 100%;
+    border: solid $accent;
+}
+
+#preview {
+    width: 2fr;
+    height: 100%;
+    border: solid $accent;
+    margin-left: 1;
+}

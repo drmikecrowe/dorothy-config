@@ -1,0 +1,3 @@
+#!/bin/bash
+
+op run /home/mcrowe/.local/bin/sgpt "$*"

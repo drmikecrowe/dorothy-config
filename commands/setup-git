@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Custom setup-git that preserves existing ~/.config/git configuration
+# Overrides: https://github.com/bevry/dorothy/blob/master/commands/setup-git
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_git() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# Parse arguments but ignore them - we're not reconfiguring anything
+	local item action='setup'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h')
+			cat <<-EOF
+				ABOUT:
+				Custom setup-git - git configuration already managed in ~/.config/git
+
+				USAGE:
+				setup-git [--help]
+
+				NOTE:
+				This is a custom override that skips all configuration.
+				Git settings are managed directly in ~/.config/git/config
+			EOF
+			return 0
+			;;
+		'--no-reconfigure'* | '--reconfigure'* | '--no-fallback'* | '--fallback'* | \
+		'--no-deps'* | '--deps'* | '--slim'*) ;;  # ignore
+		'setup' | 'update' | 'install' | 'configure') action="$item" ;;
+		*) ;;
+		esac
+	done
+
+	echo-style --bold="setup-git:" " Using existing ~/.config/git configuration (skipping Dorothy git setup)"
+)
+
+setup_git "$@"

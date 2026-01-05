@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+# Setup local DNS with Bonjour/mDNS support and reliable upstream DNS
+# Configures avahi-daemon for .local discovery and systemd-resolved for upstream
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_dns_local() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# Configuration defaults
+	local UPSTREAM_PROVIDER='cloudflare'
+	local ENABLE_MDNS='yes'
+	local ENABLE_LLMNR='yes'
+
+	# Parse arguments
+	local item action='setup'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h')
+			cat <<-EOF
+				ABOUT:
+				Setup local DNS with Bonjour/mDNS support and reliable upstream DNS.
+				Configures avahi-daemon for .local service discovery and systemd-resolved
+				for encrypted upstream DNS resolution.
+
+				USAGE:
+				setup-dns-local [options]
+
+				OPTIONS:
+				--provider=<provider>   Upstream DNS provider (default: cloudflare)
+				                        Options: cloudflare, google, quad9, nextdns
+				--no-mdns               Disable mDNS (Bonjour) support
+				--no-llmnr              Disable LLMNR (Windows name resolution)
+				--status                Show current DNS and mDNS status
+				--uninstall             Disable avahi and reset DNS to defaults
+
+				FEATURES:
+				- Bonjour/mDNS: Discovers .local services (printers, AirPlay, etc.)
+				- Encrypted DNS: DNS-over-TLS to upstream provider
+				- Route53/External: Reliable resolution via Cloudflare/Google/Quad9
+
+				EXAMPLES:
+				setup-dns-local                          # Default: Cloudflare + mDNS
+				setup-dns-local --provider=quad9         # Use Quad9 upstream
+				setup-dns-local --status                 # Check current config
+			EOF
+			return 0
+			;;
+		'--provider='*) UPSTREAM_PROVIDER="${item#*=}" ;;
+		'--no-mdns') ENABLE_MDNS='no' ;;
+		'--no-llmnr') ENABLE_LLMNR='no' ;;
+		'--status') action='status' ;;
+		'--uninstall') action='uninstall' ;;
+		'setup' | 'install') action='setup' ;;
+		*) ;;
+		esac
+	done
+
+	# Provider configurations (DNS-over-TLS endpoints)
+	local DNS_SERVERS FALLBACK_SERVERS
+	case "$UPSTREAM_PROVIDER" in
+	'cloudflare')
+		DNS_SERVERS='1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com 2606:4700:4700::1111#cloudflare-dns.com 2606:4700:4700::1001#cloudflare-dns.com'
+		FALLBACK_SERVERS='9.9.9.9#dns.quad9.net 8.8.8.8#dns.google'
+		;;
+	'google')
+		DNS_SERVERS='8.8.8.8#dns.google 8.8.4.4#dns.google 2001:4860:4860::8888#dns.google 2001:4860:4860::8844#dns.google'
+		FALLBACK_SERVERS='1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net'
+		;;
+	'quad9')
+		DNS_SERVERS='9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net 2620:fe::fe#dns.quad9.net 2620:fe::9#dns.quad9.net'
+		FALLBACK_SERVERS='1.1.1.1#cloudflare-dns.com 8.8.8.8#dns.google'
+		;;
+	'nextdns')
+		DNS_SERVERS='45.90.28.0#dns.nextdns.io 45.90.30.0#dns.nextdns.io 2a07:a8c0::#dns.nextdns.io 2a07:a8c1::#dns.nextdns.io'
+		FALLBACK_SERVERS='1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net'
+		;;
+	*)
+		echo-style --error="Unknown provider: $UPSTREAM_PROVIDER"
+		echo-style --dim="Valid options: cloudflare, google, quad9, nextdns"
+		return 1
+		;;
+	esac
+
+	case "$action" in
+	'status')
+		echo-style --h1="DNS & mDNS Status"
+
+		echo-style --h2="Avahi (mDNS/Bonjour)"
+		if systemctl is-active --quiet avahi-daemon; then
+			echo-style --success="avahi-daemon is running"
+			avahi-browse -a -t 2>/dev/null | head -10 || echo-style --dim="(no services found or avahi-browse not available)"
+		else
+			echo-style --warning="avahi-daemon is not running"
+		fi
+
+		echo
+		echo-style --h2="systemd-resolved"
+		resolvectl status 2>/dev/null | head -30 || echo-style --dim="resolvectl not available"
+
+		echo
+		echo-style --h2="DNS Test"
+		echo-style --dim="Testing external DNS (cloudflare.com)..."
+		if resolvectl query cloudflare.com --no-pager &>/dev/null; then
+			echo-style --success="External DNS working"
+		else
+			echo-style --error="External DNS failed"
+		fi
+
+		echo-style --dim="Testing mDNS (.local)..."
+		local mdns_time
+		mdns_time=$( { time resolvectl query "$(hostname).local" &>/dev/null; } 2>&1 | grep real | awk '{print $2}' )
+		if resolvectl query "$(hostname).local" &>/dev/null; then
+			echo-style --success="mDNS working ($(hostname).local resolves in ${mdns_time:-<1s})"
+		else
+			echo-style --warning="mDNS may not be working"
+		fi
+
+		return 0
+		;;
+
+	'uninstall')
+		echo-style --h1="Removing Local DNS Configuration"
+
+		echo-style --h2="Stopping avahi-daemon"
+		sudo-helper -- systemctl disable --now avahi-daemon 2>/dev/null || true
+
+		echo-style --h2="Removing resolved.conf.d overrides"
+		sudo-helper -- rm -f /etc/systemd/resolved.conf.d/local-dns.conf
+
+		echo-style --h2="Restarting systemd-resolved"
+		sudo-helper -- systemctl restart systemd-resolved
+
+		echo-style --success="Uninstall complete - using system defaults"
+		return 0
+		;;
+
+	'setup')
+		# Linux only
+		if ! is-linux; then
+			echo-style --error="setup-dns-local is only supported on Linux"
+			return 1
+		fi
+
+		# Check for required tools
+		if ! command -v systemctl &>/dev/null || ! command -v resolvectl &>/dev/null; then
+			echo-style --error="Requires systemd with systemd-resolved"
+			return 1
+		fi
+
+		echo-style --h1="Setting up Local DNS"
+		echo-style --dim="Provider: $UPSTREAM_PROVIDER | mDNS: $ENABLE_MDNS | LLMNR: $ENABLE_LLMNR"
+
+		# Step 1: Install and enable avahi-daemon for mDNS
+		if [[ $ENABLE_MDNS == 'yes' ]]; then
+			echo-style --h2="Configuring Avahi (mDNS/Bonjour)"
+
+			# Install avahi if needed
+			if ! command -v avahi-daemon &>/dev/null; then
+				echo-style --dim="Installing avahi..."
+				if command -v pacman &>/dev/null; then
+					sudo-helper -- pacman -S --noconfirm avahi nss-mdns
+				elif command -v apt-get &>/dev/null; then
+					sudo-helper -- apt-get install -y avahi-daemon libnss-mdns
+				else
+					echo-style --warning="Please install avahi-daemon manually"
+				fi
+			fi
+
+			# Enable avahi-daemon
+			echo-style --dim="Enabling avahi-daemon..."
+			sudo-helper -- systemctl enable --now avahi-daemon
+
+			# Configure NSS for hostname resolution
+			# NOTE: We use systemd-resolved's 'resolve' module for mDNS instead of avahi's
+			# nss-mdns modules (mdns_minimal/mdns4_minimal). The avahi NSS modules have
+			# known issues with timeouts and fallback behavior that cause 10+ second delays.
+			# systemd-resolved handles mDNS properly when MulticastDNS=yes is set.
+			if [[ -f /etc/nsswitch.conf ]]; then
+				local current_hosts
+				current_hosts=$(grep '^hosts:' /etc/nsswitch.conf)
+				# Remove any mdns* modules and ensure resolve is present
+				if [[ "$current_hosts" == *mdns* ]] || [[ "$current_hosts" != *resolve* ]]; then
+					echo-style --dim="Configuring NSS for systemd-resolved..."
+					sudo-helper -- sed -i 's/^hosts:.*/hosts: mymachines resolve [!UNAVAIL=return] files myhostname dns/' /etc/nsswitch.conf
+				fi
+			fi
+		fi
+
+		# Step 2: Configure systemd-resolved
+		echo-style --h2="Configuring systemd-resolved"
+
+		# Create drop-in directory
+		sudo-helper -- mkdir -p /etc/systemd/resolved.conf.d
+
+		# Create configuration
+		local resolved_conf="/etc/systemd/resolved.conf.d/local-dns.conf"
+		sudo-helper -- tee "$resolved_conf" >/dev/null <<-EOF
+			# Local DNS configuration - generated by setup-dns-local
+			# Upstream: $UPSTREAM_PROVIDER | mDNS: $ENABLE_MDNS | LLMNR: $ENABLE_LLMNR
+
+			[Resolve]
+			# Upstream DNS servers (DNS-over-TLS)
+			DNS=$DNS_SERVERS
+			FallbackDNS=$FALLBACK_SERVERS
+
+			# Enable DNS-over-TLS for encrypted queries
+			DNSOverTLS=yes
+
+			# DNSSEC validation (allow-downgrade for compatibility)
+			DNSSEC=allow-downgrade
+
+			# mDNS for .local Bonjour discovery
+			MulticastDNS=$ENABLE_MDNS
+
+			# LLMNR for Windows name resolution
+			LLMNR=$ENABLE_LLMNR
+
+			# Cache DNS responses
+			Cache=yes
+
+			# Listen on localhost for DNS queries
+			DNSStubListener=yes
+		EOF
+		echo-style --dim="Created $resolved_conf"
+
+		# Step 3: Ensure /etc/resolv.conf points to systemd-resolved stub
+		echo-style --h2="Configuring /etc/resolv.conf"
+		if [[ ! -L /etc/resolv.conf ]] || [[ "$(readlink /etc/resolv.conf)" != "../run/systemd/resolve/stub-resolv.conf" ]]; then
+			echo-style --dim="Linking to systemd-resolved stub..."
+			sudo-helper -- ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+		else
+			echo-style --dim="Already linked to systemd-resolved stub"
+		fi
+
+		# Step 4: Restart services
+		echo-style --h2="Restarting services"
+		sudo-helper -- systemctl restart systemd-resolved
+		if [[ $ENABLE_MDNS == 'yes' ]]; then
+			sudo-helper -- systemctl restart avahi-daemon 2>/dev/null || true
+		fi
+
+		# Step 5: Flush caches
+		echo-style --dim="Flushing DNS caches..."
+		resolvectl flush-caches 2>/dev/null || true
+
+		# Summary
+		echo
+		echo-style --h1="Setup Complete"
+		echo-style --success="Upstream DNS: $UPSTREAM_PROVIDER (DNS-over-TLS)"
+		if [[ $ENABLE_MDNS == 'yes' ]]; then
+			echo-style --success="mDNS/Bonjour: enabled (avahi-daemon)"
+		fi
+		echo
+		echo-style --notice="Run 'setup-dns-local --status' to verify configuration"
+
+		return 0
+		;;
+	esac
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_dns_local "$@"
+fi

@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Setup Linux memory cache with zram compressed swap
+# Installs zram-generator and configures optimal swappiness
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_linux_cache() (
+	source "$DOROTHY/sources/stdinargs.bash"
+
+	# Configuration
+	local ZRAM_SIZE_MB=8192
+	local COMPRESSION_ALGO='zstd'
+	local SWAP_PRIORITY=100
+	local SWAPPINESS=40
+
+	# Parse arguments
+	local item action='setup'
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h')
+			cat <<-EOF
+				ABOUT:
+				Setup Linux memory cache with zram compressed swap.
+				Installs zram-generator and configures optimal swappiness for zram.
+
+				USAGE:
+				setup-linux-cache [options]
+
+				OPTIONS:
+				--zram-size=<MB>      Size of zram device in MB (default: $ZRAM_SIZE_MB)
+				--swappiness=<0-200>  Swappiness value (default: $SWAPPINESS)
+				--status              Show current zram and swap status
+				--uninstall           Remove zram-generator and reset swappiness
+
+				NOTES:
+				- zram is RAM-backed compressed swap, much faster than disk swap
+				- Higher swappiness (100) is recommended for zram since it's RAM-backed
+				- Default 8GB zram with zstd compression
+			EOF
+			return 0
+			;;
+		'--zram-size='*) ZRAM_SIZE_MB="${item#*=}" ;;
+		'--swappiness='*) SWAPPINESS="${item#*=}" ;;
+		'--status') action='status' ;;
+		'--uninstall') action='uninstall' ;;
+		'setup' | 'install') action='setup' ;;
+		*) ;;
+		esac
+	done
+
+	case "$action" in
+	'status')
+		echo-style --h1="Zram Status"
+		if command-exists zramctl; then
+			zramctl
+		else
+			echo-style --dim="zramctl not available"
+		fi
+		echo
+		echo-style --h2="Swap Usage"
+		cat /proc/swaps 2>/dev/null || echo-style --dim="No swap info available"
+		echo
+		echo-style --h2="Memory"
+		free -h
+		echo
+		echo-style --h2="Swappiness"
+		echo "vm.swappiness = $(cat /proc/sys/vm/swappiness)"
+		return 0
+		;;
+	'uninstall')
+		echo-style --h1="Uninstalling zram-generator"
+		if command-exists pacman; then
+			sudo-helper -- pacman -Rs --noconfirm zram-generator 2>/dev/null || true
+		fi
+		sudo-helper -- rm -f /etc/systemd/zram-generator.conf
+		sudo-helper -- rm -f /etc/sysctl.d/99-zram-swappiness.conf
+		echo-style --h2="Resetting swappiness to default (60)"
+		sudo-helper -- sysctl vm.swappiness=60
+		echo-style --success="Uninstall complete. Reboot to fully disable zram."
+		return 0
+		;;
+	'setup')
+		# Linux only
+		if ! is-linux; then
+			echo-style --error="setup-linux-cache is only supported on Linux"
+			return 1
+		fi
+
+		echo-style --h1="Setting up Linux Memory Cache (zram)"
+
+		# Install zram-generator
+		echo-style --h2="Installing zram-generator"
+		if command-exists pacman; then
+			setup-util --name='zram-generator' --cli='zramctl' PACMAN='zram-generator'
+		else
+			echo-style --error="Only Arch/Manjaro (pacman) is currently supported"
+			return 1
+		fi
+
+		# Configure zram-generator
+		echo-style --h2="Configuring zram-generator"
+		local zram_conf="/etc/systemd/zram-generator.conf"
+		sudo-helper -- tee "$zram_conf" >/dev/null <<-EOF
+			[zram0]
+			zram-size = $ZRAM_SIZE_MB
+			compression-algorithm = $COMPRESSION_ALGO
+			swap-priority = $SWAP_PRIORITY
+			fs-type = swap
+		EOF
+		echo-style --dim="Created $zram_conf"
+
+		# Configure swappiness
+		echo-style --h2="Configuring swappiness"
+		local sysctl_conf="/etc/sysctl.d/99-zram-swappiness.conf"
+		sudo-helper -- tee "$sysctl_conf" >/dev/null <<-EOF
+			# Swappiness for zram - high value is optimal since zram is RAM-backed
+			# zram compresses memory in RAM, so aggressive swapping is efficient
+			vm.swappiness = $SWAPPINESS
+		EOF
+		echo-style --dim="Created $sysctl_conf"
+
+		# Remove any conflicting swappiness configs
+		local old_conf
+		for old_conf in /etc/sysctl.d/99-swappiness.conf /etc/sysctl.d/99swappiness.conf; do
+			if [[ -f "$old_conf" && "$old_conf" != "$sysctl_conf" ]]; then
+				echo-style --dim="Removing old config: $old_conf"
+				sudo-helper -- rm -f "$old_conf"
+			fi
+		done
+
+		# Apply sysctl changes
+		echo-style --h2="Applying sysctl settings"
+		sudo-helper -- sysctl --system >/dev/null
+		echo-style --dim="vm.swappiness = $(cat /proc/sys/vm/swappiness)"
+
+		# Summary
+		echo
+		echo-style --h1="Setup Complete"
+		echo-style --success="zram configured: ${ZRAM_SIZE_MB}MB with $COMPRESSION_ALGO compression"
+		echo-style --success="Swappiness set to $SWAPPINESS"
+		echo
+		echo-style --notice="Reboot to activate zram swap, or run:"
+		echo-style --code="sudo systemctl daemon-reload && sudo systemctl start systemd-zram-setup@zram0.service"
+		return 0
+		;;
+	esac
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_linux_cache "$@"
+fi

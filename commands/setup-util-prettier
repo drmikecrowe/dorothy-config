@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# https://prettier.io/docs/en/install.html
+# Fixed for Arch: add PACMAN option (npm global install requires root)
+
+function setup_util_prettier() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--name='Prettier'
+		--cli='prettier'
+		"$@"
+		PACMAN='prettier'  # ARCH (extra repo)
+		BREW='prettier'
+		NODE='prettier'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_prettier "$@"
+fi
