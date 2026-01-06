@@ -1,37 +1,94 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Exit on any error
-set -e
+function rsync_folder() (
+	source "$DOROTHY/sources/bash.bash"
 
-# Check if we have at least 2 arguments
-if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 source_directory destination_directory"
-  exit 1
-fi
+	# =====================================
+	# Arguments
 
-# Ensure destination directory exists
-if [ -e "$2" ]; then
-  rm -rf "$2"
-fi
-mkdir -p "$2"
+	# help
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Rsync a source directory to a destination directory with sensible defaults.
+			Excludes common development directories (.git, node_modules, etc.).
 
-# Perform rsync with error handling
-if ! rsync -armR --info=progress2 \
-  --exclude='.esbuild' \
-  --exclude='.jest' \
-  --exclude='.history' \
-  --exclude='.pnpm-store' \
-  --exclude='node_modules/' \
-  --exclude='.tmp/' \
-  --exclude='.git/' \
-  --exclude='.webpack/' \
-  --exclude='.serverless/' \
-  --exclude='coverage/' \
-  --delete \
-  --checksum \
-  --stats \
-  --human-readable \
-  "$@"; then
-  echo "Error: rsync failed"
-  exit 1
+			USAGE:
+			rsyncFolder <source> <destination>
+
+			OPTIONS:
+			<source>
+			    The source directory to copy from.
+
+			<destination>
+			    The destination directory to copy to.
+			    Will be created if it doesn't exist, or replaced if it does.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL 22 Invalid argument
+	}
+
+	# process
+	local item option_source='' option_destination=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--source='*) option_source="${item#*=}" ;;
+		'--destination='*) option_destination="${item#*=}" ;;
+		'--'*) help 'An unrecognised flag was provided:' --variable-value="$item" ;;
+		*)
+			if [[ -z $option_source ]]; then
+				option_source="$item"
+			elif [[ -z $option_destination ]]; then
+				option_destination="$item"
+			else
+				help 'An unrecognised argument was provided:' --variable-value="$item"
+			fi
+			;;
+		esac
+	done
+
+	# validate
+	if [[ -z $option_source ]]; then
+		help 'Missing required argument: <source>'
+	fi
+	if [[ -z $option_destination ]]; then
+		help 'Missing required argument: <destination>'
+	fi
+
+	# =====================================
+	# Action
+
+	# Ensure destination directory exists (remove if present, then create)
+	if [[ -e $option_destination ]]; then
+		rm -rf "$option_destination"
+	fi
+	mkdir -p "$option_destination"
+
+	# Perform rsync
+	rsync -armR --info=progress2 \
+		--exclude='.esbuild' \
+		--exclude='.jest' \
+		--exclude='.history' \
+		--exclude='.pnpm-store' \
+		--exclude='node_modules/' \
+		--exclude='.tmp/' \
+		--exclude='.git/' \
+		--exclude='.webpack/' \
+		--exclude='.serverless/' \
+		--exclude='coverage/' \
+		--delete \
+		--checksum \
+		--stats \
+		--human-readable \
+		"$option_source" "$option_destination"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	rsync_folder "$@"
 fi
