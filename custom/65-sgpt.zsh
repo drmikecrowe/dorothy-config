@@ -22,7 +22,7 @@ _sgpt_zsh() {
     zle -I && zle redisplay
 
     local _sgpt_result
-    if _sgpt_result=$(op run -- sgpt --shell <<< "$_sgpt_prev_cmd" --no-interaction); then
+    if _sgpt_result=$(sgpt --shell <<< "$_sgpt_prev_cmd" --no-interaction); then
         # Trim whitespace and append original as comment
         BUFFER="${${_sgpt_result## #}%% #}  # $_sgpt_prev_cmd"
     else
