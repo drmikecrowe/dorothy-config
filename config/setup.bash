@@ -109,7 +109,8 @@ SETUP_GLOBAL_PNPM_PACKAGES=(
     @himorishige/hatago-mcp-hub
     json-sort-cli
     opencode-ai
-    @vtsls/language-server typescript
+    @vtsls/language-server
+    typescript
 )
 
 # =============================================================================
