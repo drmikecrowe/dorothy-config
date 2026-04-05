@@ -41,7 +41,10 @@ if [[ -n "$ZSH_VERSION" ]]; then
     autoload -U +X bashcompinit && bashcompinit 2>/dev/null
     autoload -U +X compinit && compinit 2>/dev/null
 fi
-complete -F __aws_sso_profile_complete aws-sso-profile
-complete -C /usr/local/bin/aws-sso-cli aws-sso
+# complete is a bash builtin, but requires bashcompinit in zsh
+if [[ -z "$ZSH_VERSION" ]] || whence -w complete &>/dev/null; then
+    complete -F __aws_sso_profile_complete aws-sso-profile
+    complete -C /usr/local/bin/aws-sso-cli aws-sso
+fi
 
 # END_AWS_SSO_CLI
