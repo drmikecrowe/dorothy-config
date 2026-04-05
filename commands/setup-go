@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Custom setup-go - Go tools managed via pyinfra/pacman instead
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_go() (
+    # Load config to check if anything needs installing
+    source "$DOROTHY/sources/config.sh"
+    local GO_INSTALL=()
+    load_dorothy_config 'setup.bash'
+
+    if [[ ${#GO_INSTALL[@]} -eq 0 ]]; then
+        echo-style --dim="Setup of Go ecosystem skipped (tools managed via pyinfra/pacman)."
+        return 0
+    fi
+
+    # If there are packages, call the original
+    "$DOROTHY/commands/setup-go" "$@"
+)
+
+setup_go "$@"

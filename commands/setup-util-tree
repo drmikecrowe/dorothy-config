@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Fixed for Arch: add PACMAN option
+
+function setup_util_tree() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# setup
+	local options=(
+		--cli='tree'
+		"$@"
+		PACMAN='tree'  # ARCH (extra repo)
+		APK='tree'     # ALPINE
+		APT='tree'     # UBUNTU
+		BREW='tree'
+	)
+	setup-util "${options[@]}"
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_tree "$@"
+fi

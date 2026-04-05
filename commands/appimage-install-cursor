@@ -1,0 +1,66 @@
+#!/bin/bash
+
+set -e
+
+echo "Fetching download page..."
+PAGE_CONTENT=$(curl -s https://cursor.com/download)
+
+# <a href="https://downloads.cursor.com/production/45fd70f3fe72037444ba35c9e51ce86a1977ac11/linux/x64/Cursor-2.0.34-x86_64.AppImage" download="" class="pt-v7/12 pb-v8/12 block w-full hover:opacity-75"><div class="flex items-center justify-between"><span>Linux AppImage (x64)</span><span class="icon-glyph-08">⤓</span></div></a>
+# Find the download URL for the Linux AppImage (x64)
+DOWNLOAD_URL=$(echo "$PAGE_CONTENT" | htmlq -a href 'a' | grep -E 'linux-x64/' | head -n 1)
+
+if [ -z "$DOWNLOAD_URL" ]; then
+  echo "Could not find download URL for Linux AppImage (x64)."
+  exit 1
+fi
+
+echo "Found download URL: $DOWNLOAD_URL"
+
+# Create a temporary directory for the download
+TMP_DIR=$(mktemp -d)
+echo "Downloading to temporary directory: $TMP_DIR"
+
+# Download the AppImage using wget, which will follow redirects and save with the correct filename
+wget -P "$TMP_DIR" --content-disposition "$DOWNLOAD_URL"
+
+# Find the downloaded AppImage file
+DOWNLOADED_FILE=$(find "$TMP_DIR" -name "*.AppImage")
+
+if [ ! -f "$DOWNLOADED_FILE" ]; then
+  echo "Failed to download the AppImage."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+echo "Downloaded file: $DOWNLOADED_FILE"
+
+# Move the AppImage to the user's Downloads directory
+DOWNLOADS_DIR="$HOME/Downloads"
+mkdir -p "$DOWNLOADS_DIR"
+APPIMAGE_PATH="$DOWNLOADS_DIR/$(basename "$DOWNLOADED_FILE")"
+mv "$DOWNLOADED_FILE" "$APPIMAGE_PATH"
+
+echo "Moved AppImage to: $APPIMAGE_PATH"
+
+# Check if appimage-manager exists and is executable
+if ! command -v appimage-manager &> /dev/null; then
+    echo "appimage-manager could not be found. Please ensure it is in your PATH and executable."
+    # Clean up the downloaded file
+    rm "$APPIMAGE_PATH"
+    exit 1
+fi
+
+echo "Installing with appimage-manager..."
+if appimage-manager install "$APPIMAGE_PATH"; then
+  echo "Installation successful."
+  echo "Removing downloaded file: $APPIMAGE_PATH"
+  rm "$APPIMAGE_PATH"
+else
+  echo "Installation failed. The downloaded file is located at: $APPIMAGE_PATH"
+  exit 1
+fi
+
+# Clean up the temporary directory
+rm -rf "$TMP_DIR"
+
+echo "Cursor AppImage installation complete."

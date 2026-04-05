@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Merge python-poetry mise template into local mise.toml"""
+
+import json
+import re
+from pathlib import Path
+
+TEMPLATE = '''
+[env]
+_.python.venv = ".venv"
+PYTHONWARNINGS="ignore"
+MISE_POETRY_AUTO_INSTALL = "1"
+
+[tools]
+poetry = { version = "latest", pyproject = "pyproject.toml" }
+python = "{{ get_env(name='PYTHON_VERSION', default='3.11') }}"
+
+[tasks.setup-python-poetry]
+run = \'\'\'
+if [ ! -d .venv ]; then
+    python -m venv .venv
+    PATH=.venv/bin
+fi
+if [ ! -f pyproject.toml ]; then
+    poetry init
+else
+    poetry sync
+fi
+if [ -f requirements.txt ]; then
+    poetry add $(cat requirements.txt)
+fi
+\'\'\'
+'''
+
+
+def parse_toml(text: str) -> dict:
+    """Simple TOML parser for mise config files."""
+    content = {}
+    section_name = None
+    for line in text.strip().splitlines():
+        if line.startswith("["):
+            section_name = line.strip()
+            content[section_name] = {"lines": [], "items": {}, "using": None}
+        elif section_name and line.strip():
+            section = content[section_name]
+            if section_name.startswith("[tasks."):
+                section["lines"].append(line)
+                section["using"] = "lines"
+            else:
+                section["using"] = "items"
+                parts = re.split(r" *= *", line.strip(), maxsplit=1)
+                if len(parts) == 2:
+                    section["items"][parts[0]] = parts[1]
+    return content
+
+
+def merge_toml(base: dict, other: dict) -> dict:
+    """Merge other into base, handling list appends."""
+    for key, value in other.items():
+        if key not in base:
+            base[key] = value
+            continue
+        if value["using"] == "lines":
+            base[key]["lines"] = value["lines"][:]
+            base[key]["using"] = "lines"
+        else:
+            base[key].setdefault("items", {})
+            base[key]["using"] = "items"
+            for k, v in value["items"].items():
+                base[key]["items"][k] = v
+    return base
+
+
+def to_string(content: dict) -> str:
+    """Convert parsed TOML back to string."""
+    lines = []
+    for section_name, section in content.items():
+        lines.append(section_name)
+        if section.get("using") == "lines":
+            lines.extend(section["lines"])
+        else:
+            for k, v in section.get("items", {}).items():
+                lines.append(f"{k} = {v}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def main():
+    mise_path = Path.cwd() / ".mise.toml"
+    if not mise_path.exists():
+        mise_path = Path.cwd() / "mise.toml"
+
+    base = {}
+    if mise_path.exists():
+        base = parse_toml(mise_path.read_text())
+        print(f"Merging into existing {mise_path}")
+    else:
+        mise_path = Path.cwd() / "mise.toml"
+        print(f"Creating {mise_path}")
+
+    template = parse_toml(TEMPLATE)
+    merged = merge_toml(base, template)
+    mise_path.write_text(to_string(merged))
+    print("Done. Added python + poetry configuration.")
+
+
+if __name__ == "__main__":
+    main()

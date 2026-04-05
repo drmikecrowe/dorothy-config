@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-tailscale
+# Purpose: Install Tailscale
+
+if command -v tailscale &> /dev/null; then
+    echo "Tailscale is already installed"
+else
+    echo "Installing Tailscale..."
+    if command -v yay &> /dev/null; then
+        yay -S --needed --noconfirm tailscale
+        sudo systemctl enable --now tailscaled
+    else
+        curl -fsSL https://tailscale.com/install.sh | sh
+    fi
+fi

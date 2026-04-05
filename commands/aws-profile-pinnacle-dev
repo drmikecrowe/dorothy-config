@@ -1,0 +1,8 @@
+#!/bin/bash
+CMD="credentials"
+if [[ ! -z "$1" ]]; then
+  CMD="$1"
+  shift
+fi
+set -x
+aws-sso -S pinnacle "$CMD" -p pinnacle-dev "$@"

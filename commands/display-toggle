@@ -1,0 +1,22 @@
+#!/bin/bash
+# Toggle between internal laptop display (eDP-1) and external display (HDMI-A-1)
+# Uses kscreen-doctor for KDE Plasma Wayland
+
+set -e
+
+INTERNAL="eDP-1"
+EXTERNAL="HDMI-A-1"
+
+# Check which display is currently enabled by looking at priority
+# Priority 1 = primary/enabled, Priority 0 = disabled
+current_state=$(kscreen-doctor --outputs 2>/dev/null)
+
+if echo "$current_state" | grep -A5 "Output:.*$EXTERNAL" | grep -q "priority 1"; then
+    # External is active, switch to internal
+    echo "Switching to internal display ($INTERNAL)..."
+    kscreen-doctor output.$EXTERNAL.disable output.$INTERNAL.enable output.$INTERNAL.priority.1
+else
+    # Internal is active (or neither), switch to external
+    echo "Switching to external display ($EXTERNAL)..."
+    kscreen-doctor output.$INTERNAL.disable output.$EXTERNAL.enable output.$EXTERNAL.priority.1
+fi

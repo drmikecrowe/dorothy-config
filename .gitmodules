@@ -1,0 +1,9 @@
+[submodule "oh-my-zsh-custom/plugins/autoenv"]
+	path = oh-my-zsh-custom/plugins/autoenv
+	url = https://github.com/zpm-zsh/autoenv
+[submodule "oh-my-zsh-custom/plugins/synu"]
+	path = oh-my-zsh-custom/plugins/synu
+	url = https://git.secluded.site/synu.git
+[submodule "oh-my-zsh-custom/plugins/zsh-autosuggestions"]
+	path = oh-my-zsh-custom/plugins/zsh-autosuggestions
+	url = https://github.com/zsh-users/zsh-autosuggestions

@@ -1,0 +1,10 @@
+#!/bin/bash
+# Cross-platform clipboard copy (supports macOS, Wayland, and X11)
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    /usr/bin/pbcopy "$@"
+elif [[ ! -z "$WAYLAND_DISPLAY" ]]; then
+    wl-copy "$@"
+else
+    xclip -selection clipboard -in "$@"
+fi

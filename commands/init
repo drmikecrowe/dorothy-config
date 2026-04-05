@@ -1,0 +1,25 @@
+#!/bin/bash
+# Combined initialization script
+
+# Check if gum is available
+if ! command -v gum &> /dev/null; then
+    echo "Error: gum is required for this script"
+    echo "Install with: brew install gum (or your package manager)"
+    exit 1
+fi
+
+# Let user choose what to initialize
+choice=$(echo -e "Claude snippets\nProject templates" | gum choose --header="What would you like to initialize?")
+
+case "$choice" in
+    "Claude snippets")
+        claude-init
+        ;;
+    "Project templates")
+        template-init
+        ;;
+    *)
+        echo "No selection made, exiting."
+        exit 0
+        ;;
+esac

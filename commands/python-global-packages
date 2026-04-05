@@ -1,0 +1,23 @@
+#!/bin/bash
+
+echo "🐍 Managing Python global packages..."
+
+# Reinstall all pipx packages (fixes interpreter issues when Python versions change)
+echo "📦 Reinstalling pipx packages..."
+pipx reinstall-all
+
+# Force reinstall of default Python packages for current mise Python version
+# This ensures packages are available even when switching Python versions
+echo "🔄 Ensuring default Python packages are installed..."
+PYTHON_VERSION=$(mise current python)
+echo "Using Python version: $PYTHON_VERSION"
+
+# Read the default packages file and install them
+if [ -f ~/.default-python-packages ]; then
+    echo "📋 Installing packages from ~/.default-python-packages..."
+    mise exec python -- python -m pip install --upgrade $(cat ~/.default-python-packages | tr '\n' ' ')
+else
+    echo "⚠️  ~/.default-python-packages not found"
+fi
+
+echo "✅ Python global package management complete!"

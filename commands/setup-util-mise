@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-mise
+# Purpose: Install mise runtime manager
+
+if command -v mise &> /dev/null; then
+    echo "mise is already installed"
+else
+    echo "Installing mise..."
+    curl https://mise.run | sh
+fi

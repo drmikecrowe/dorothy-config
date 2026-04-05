@@ -1,0 +1,77 @@
+#!/bin/bash
+# General template initialization script
+
+TEMPLATES_DIR="$HOME/.shell.d/templates"
+
+# Check if gum is available
+if ! command -v gum &> /dev/null; then
+    echo "Error: gum is required for this script"
+    echo "Install with: brew install gum (or your package manager)"
+    exit 1
+fi
+
+# Get list of available template directories (exclude claude-snippets)
+templates=()
+while IFS= read -r -d '' dir; do
+    basename=$(basename "$dir")
+    [[ "$basename" != "claude-snippets" ]] && templates+=("$basename")
+done < <(find "$TEMPLATES_DIR" -maxdepth 1 -type d -not -path "$TEMPLATES_DIR" -print0 | sort -z)
+
+if [[ ${#templates[@]} -eq 0 ]]; then
+    echo "No templates found in $TEMPLATES_DIR"
+    exit 1
+fi
+
+# Let user choose template
+echo "Available project templates:"
+chosen=$(printf '%s\n' "${templates[@]}" | gum choose --header="Select template to initialize" --height=10)
+
+if [[ -z "$chosen" ]]; then
+    echo "No template selected, exiting."
+    exit 0
+fi
+
+template_dir="$TEMPLATES_DIR/$chosen"
+
+# Show template contents
+echo
+echo "Template contents:"
+echo "─────────────────"
+if [[ -f "$template_dir" ]]; then
+    # It's a file, show its contents
+    gum style --border rounded --padding "1 2" --margin "1 0" "$(cat "$template_dir")"
+else
+    # It's a directory, list its contents
+    ls -la "$template_dir"
+fi
+echo
+
+# Get target directory
+current_dir=$(pwd)
+target_dir=$(gum input --placeholder="Target directory (default: current)" --value="$current_dir")
+target_dir=${target_dir:-$current_dir}
+
+# Confirm initialization
+if gum confirm "Initialize template '$chosen' in '$target_dir'?"; then
+    cd "$target_dir" || exit 1
+    
+    if [[ -f "$template_dir" ]]; then
+        # Template is a single file - execute it if it's a script
+        if [[ -x "$template_dir" ]]; then
+            echo "Executing template script..."
+            "$template_dir"
+        else
+            echo "Copying template file..."
+            cp "$template_dir" "./$(basename "$template_dir")"
+        fi
+    else
+        # Template is a directory - copy contents
+        echo "Copying template directory contents..."
+        cp -r "$template_dir"/* ./ 2>/dev/null || true
+        cp -r "$template_dir"/.* ./ 2>/dev/null || true
+    fi
+    
+    echo "✅ Template '$chosen' initialized in '$target_dir'"
+else
+    echo "Cancelled."
+fi

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Custom setup-ruby - Ruby managed via mise
+
+source "$DOROTHY/sources/bash.bash"
+
+function setup_ruby() (
+    source "$DOROTHY/sources/config.sh"
+    local GEM_INSTALL=()
+    load_dorothy_config 'setup.bash'
+
+    if [[ ${#GEM_INSTALL[@]} -eq 0 ]]; then
+        echo-style --dim="Setup of Ruby ecosystem skipped (managed via mise)."
+        return 0
+    fi
+
+    "$DOROTHY/commands/setup-ruby" "$@"
+)
+
+setup_ruby "$@"

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-chezmoi
+# Purpose: Install chezmoi dotfile manager and apply dotfiles
+
+# https://www.chezmoi.io
+# https://www.chezmoi.io/install/
+
+if command -v chezmoi &> /dev/null; then
+    echo "chezmoi is already installed"
+else
+    echo "Installing chezmoi..."
+    if [[ -z "${GITHUB_USERNAME:-}" ]]; then
+        echo "ERROR: GITHUB_USERNAME is not set" >&2
+        exit 1
+    fi
+    sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply "$GITHUB_USERNAME"
+fi

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-aws
+# Purpose: Install AWS CLI v2
+
+if command -v aws &> /dev/null; then
+    echo "AWS CLI is already installed"
+else
+    echo "Installing AWS CLI v2..."
+    # Check for pacman/yay (Arch)
+    if command -v yay &> /dev/null; then
+        yay -S --needed --noconfirm aws-cli-v2-bin
+    elif command -v pacman &> /dev/null; then
+        sudo pacman -S --needed --noconfirm aws-cli
+    else
+        # Generic installation via curl
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip awscliv2.zip
+        sudo ./aws/install
+        rm -rf aws awscliv2.zip
+    fi
+fi

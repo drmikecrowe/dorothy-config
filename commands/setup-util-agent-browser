@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-agent-browser
+# Purpose: Install agent-browser and download Chrome for Testing
+
+# https://github.com/steel-dev/agent-browser
+
+if command -v agent-browser &> /dev/null; then
+    echo "agent-browser is already installed"
+else
+    echo "Installing agent-browser..."
+    npm install -g agent-browser
+    echo "Downloading Chrome for Testing (first time only)..."
+    agent-browser install
+fi

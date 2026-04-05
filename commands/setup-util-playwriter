@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-playwriter
+# Purpose: Install Playwriter browser automation tool and skill
+
+# https://github.com/remorses/playwriter
+
+if command -v playwriter &> /dev/null; then
+    echo "playwriter is already installed"
+else
+    echo "Installing playwriter..."
+    npm i -g playwriter
+fi
+
+echo "Installing playwriter skill for Claude Code..."
+npx -y skills add remorses/playwriter
+
+echo "Install the Chrome extension to complete setup:"
+echo "https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe"
+xdg-open "https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe" 2>/dev/null \
+    || open "https://chromewebstore.google.com/detail/playwriter-mcp/jfeammnjpkecdekppnclgkkffahnhfhe" 2>/dev/null \
+    || true
