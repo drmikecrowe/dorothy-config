@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Nightly update job: yay -Syu + mise self-update + mise upgrade.
+# Invoked by ~/.config/systemd/user/nightly-updates.timer.
+# Safe to run manually: `nightly-updates`
+#
+# Requires passwordless sudo for yay (verified at install time).
+
+set -uo pipefail
+
+log() { echo "[$(date -Iseconds)] $*"; }
+fail() {
+  log "FAIL: $*"
+  exit 1
+}
+
+# ── yay (Arch + AUR) ──────────────────────────────────────────────────────────
+log "==> yay -Syu --noconfirm"
+if command -v yay >/dev/null; then
+  yay -Syu --noconfirm --answerdiff=None --answerclean=None || log "WARN: yay returned non-zero"
+else
+  log "WARN: yay not installed, skipping"
+fi
+
+# ── mise (self + tools) ───────────────────────────────────────────────────────
+if command -v mise >/dev/null; then
+  log "==> mise self-update"
+  mise self-update -y || log "WARN: mise self-update returned non-zero"
+
+  log "==> mise upgrade (global tools)"
+  mise upgrade -y || log "WARN: mise upgrade returned non-zero"
+else
+  log "WARN: mise not installed, skipping"
+fi
+
+# beads
+setup-util-beads
+
+log "==> done"

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Initialize beads in current project. Uses shared dolt server, file-backed remote.
+#
+# Usage:
+#   bd-init-project              # prefix = $(basename $PWD)
+#   bd-init-project -p propri    # explicit prefix
+#   bd-init-project -h           # help
+#
+# Idempotent. Safe to re-run.
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+bd-init-project — initialize beads with shared dolt server + local-file backup
+
+Usage:
+  bd-init-project [-p PREFIX] [-b BACKUP_DIR]
+
+Options:
+  -p PREFIX       issue prefix (default: basename of cwd)
+  -b BACKUP_DIR   backup root (default: ~/backups/dolt)
+  -h              show this help
+
+Result:
+  - .beads/ created with shared-server mode
+  - dolt remote 'origin' → file://BACKUP_DIR/beads-PREFIX
+  - JSONL git-push backup disabled
+  - First push verifies the chain
+EOF
+}
+
+PREFIX=""
+BACKUP_ROOT="$HOME/backups/dolt"
+
+while getopts "p:b:h" opt; do
+  case "$opt" in
+    p) PREFIX="$OPTARG" ;;
+    b) BACKUP_ROOT="$OPTARG" ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+
+# Verify deps
+command -v bd >/dev/null   || { echo "ERROR: bd not on PATH"; exit 1; }
+command -v dolt >/dev/null || { echo "ERROR: dolt not on PATH"; exit 1; }
+
+# Verify cwd is git repo
+git rev-parse --show-toplevel >/dev/null 2>&1 || { echo "ERROR: not in a git repo"; exit 1; }
+
+# Default prefix from dirname
+if [[ -z "$PREFIX" ]]; then
+  PREFIX="$(basename "$PWD")"
+fi
+
+BACKUP_DIR="$BACKUP_ROOT/beads-$PREFIX"
+REMOTE_URL="file://$BACKUP_DIR"
+
+echo "==> Project:      $PWD"
+echo "==> Prefix:       $PREFIX"
+echo "==> Backup:       $BACKUP_DIR"
+echo
+
+# 1. Init beads (skip if already done)
+if [[ -d .beads ]]; then
+  echo "==> .beads/ exists, skipping bd init"
+else
+  echo "==> bd init --server --prefix $PREFIX"
+  bd init --server --prefix "$PREFIX" --non-interactive
+fi
+
+# 2. Ensure backup dir exists
+mkdir -p "$BACKUP_DIR"
+
+# 3. Add remote (idempotent)
+if bd dolt remote list 2>/dev/null | grep -q "^origin"; then
+  echo "==> remote 'origin' already configured"
+else
+  echo "==> bd dolt remote add origin $REMOTE_URL"
+  bd dolt remote add origin "$REMOTE_URL"
+fi
+
+# 4. Disable git-push backup, enable local backup
+echo "==> bd config: backup.git-push=false, backup.enabled=true"
+bd config set backup.git-push false >/dev/null
+bd config set backup.enabled true >/dev/null
+
+# 5. Test push
+echo "==> bd dolt push"
+if bd dolt push; then
+  echo
+  echo "OK. Beads ready."
+  echo "Next: 'bd ready' to find work, 'bd create ...' to file issues."
+else
+  echo
+  echo "WARN: push failed. Check 'bd dolt show' and 'bd doctor'."
+  exit 1
+fi

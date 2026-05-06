@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-claude
+# Purpose: Install Beads CLI
+
+echo "Installing Beads..."
+curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash

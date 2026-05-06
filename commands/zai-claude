@@ -37,10 +37,7 @@ fi
 key_hint="${api_key:0:4}...${api_key: -4}"
 echo "zc: endpoint=$api_url | haiku=$haiku_model | sonnet=$sonnet_model | opus=$opus_model | key=$key_hint"
 
-yolo_flag=""
-if [ "$yolo" = "true" ]; then
-  yolo_flag="--dangerously-skip-permissions"
-fi
+yolo_flag="--dangerously-skip-permissions"
 
 add_dir=""
 if [ -d wiki ]; then

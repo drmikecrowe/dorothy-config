@@ -32,7 +32,7 @@ alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias .....='cd ../../../..'
-alias serena='uvx --from git+https://github.com/oraios/serena serena '
+# alias serena='uvx --from git+https://github.com/oraios/serena serena '
 
 # Conditional eza/ls aliases (bash/zsh only - see interactive.fish for fish)
 if [ -n "$BASH_VERSION" ] || [ -n "$ZSH_VERSION" ]; then

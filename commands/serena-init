@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# serena-init — initialize Serena project for current git repo or worktree
+# Run once per project/worktree to set the correct project name in .serena/project.yml
+# Convention: main branch → repo-name, other worktrees → repo-name-branch
+set -euo pipefail
+
+SERENA_BIN="${SERENA_BIN:-$(which serena 2>/dev/null || echo "$HOME/.local/share/mise/shims/serena")}"
+
+# Verify we're in a git repo
+git_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "Error: not in a git repository" >&2
+    exit 1
+}
+
+# Detect worktree: git-dir differs from git-common-dir in linked worktrees and bare+worktree setups
+git_dir=$(git rev-parse --git-dir 2>/dev/null)
+git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+git_dir_abs=$(realpath "$git_dir" 2>/dev/null || readlink -f "$git_dir" 2>/dev/null || echo "$git_dir")
+git_common_dir_abs=$(realpath "$git_common_dir" 2>/dev/null || readlink -f "$git_common_dir" 2>/dev/null || echo "$git_common_dir")
+
+is_worktree=false
+[[ "$git_dir_abs" != "$git_common_dir_abs" ]] && is_worktree=true
+
+# Get repo name: prefer remote URL, fall back to parent-of-.bare (bare repos), then dir name
+repo_name=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||' | tr -d '\r') || true
+
+if [[ -z "$repo_name" ]]; then
+    # For bare+worktree pattern: git_common_dir = <project>/.bare → parent = <project>
+    bare_parent=$(dirname "$git_common_dir_abs" 2>/dev/null)
+    candidate=$(basename "$bare_parent" 2>/dev/null)
+    # Use parent name only if it looks like a project dir (not "." or root)
+    if [[ -n "$candidate" && "$candidate" != "." && "$candidate" != "/" ]]; then
+        repo_name="$candidate"
+    else
+        repo_name=$(basename "$git_root")
+    fi
+fi
+
+# Sanitize: replace slashes and spaces with dashes
+repo_name=$(echo "$repo_name" | tr '/ ' '--' | tr -s '-')
+
+# Current branch
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/ ' '--' | tr -s '-') || branch="unknown"
+
+# Project naming: main/master/develop on any worktree → repo name only
+# Any other branch (typically non-main worktrees) → repo-branch
+main_branches=("main" "master" "develop" "dev")
+is_main_branch=false
+for mb in "${main_branches[@]}"; do
+    [[ "$branch" == "$mb" ]] && is_main_branch=true && break
+done
+
+if [[ "$is_main_branch" == "true" ]]; then
+    project_name="$repo_name"
+else
+    project_name="${repo_name}-${branch}"
+fi
+
+echo "Git root:    $git_root"
+echo "Is worktree: $is_worktree"
+echo "Branch:      $branch"
+echo "Project:     $project_name"
+
+serena_dir="$git_root/.serena"
+project_yml="$serena_dir/project.yml"
+
+if [[ -f "$project_yml" ]]; then
+    # Update existing project_name field
+    if command -v sd &>/dev/null; then
+        sd 'project_name:.*' "project_name: $project_name" "$project_yml"
+    else
+        sed -i "s/^project_name:.*/project_name: $project_name/" "$project_yml"
+    fi
+    echo "Updated:  $project_yml"
+    # Re-register with serena in case path changed
+    "$SERENA_BIN" project create "$git_root" --name "$project_name" 2>/dev/null || true
+else
+    # Create new project config
+    "$SERENA_BIN" project create "$git_root" --name "$project_name"
+    echo "Created:  $project_yml"
+fi
+
+echo ""
+echo "Done. Serena project '$project_name' ready at $git_root"
+echo "Clients using --project-from-cwd will auto-detect this project."

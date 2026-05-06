@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+curl -fsSL \
+  https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh \
+  | bash

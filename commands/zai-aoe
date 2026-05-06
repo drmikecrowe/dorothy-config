@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# zai-aoe: run aoe with ZAI_API_KEY injected from 1Password
+set -euo pipefail
+
+command -v op >/dev/null || {
+	echo "ERROR: op (1Password CLI) required" >&2
+	exit 1
+}
+command -v aoe >/dev/null || {
+	echo "ERROR: aoe not found on PATH" >&2
+	exit 1
+}
+
+# `op read` instead of `op run` — op run pipes child stdout through its
+# secret-scrubber, breaking TTY detection for interactive tools.
+ZAI_API_KEY="$(op read "op://Private/ZAI_API_KEY/credential")"
+export ZAI_API_KEY
+
+exec aoe "$@"
