@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# serena-init — initialize Serena project for current git repo or worktree
-# Run once per project/worktree to set the correct project name in .serena/project.yml
-# Convention: main branch → repo-name, other worktrees → repo-name-branch
+# serena-init — initialize Serena project + .mcp.json for current git repo or worktree
+# Sets up: .serena/project.yml, serena MCP, gsd-workflow MCP, codebase-memory-mcp
+# Idempotent — safe to rerun. Merges into existing .mcp.json, never removes entries.
 set -euo pipefail
 
 SERENA_BIN="${SERENA_BIN:-$(which serena 2>/dev/null || echo "$HOME/.local/share/mise/shims/serena")}"
@@ -25,10 +25,8 @@ is_worktree=false
 repo_name=$(git remote get-url origin 2>/dev/null | sed 's|.*/||; s|\.git$||' | tr -d '\r') || true
 
 if [[ -z "$repo_name" ]]; then
-    # For bare+worktree pattern: git_common_dir = <project>/.bare → parent = <project>
     bare_parent=$(dirname "$git_common_dir_abs" 2>/dev/null)
     candidate=$(basename "$bare_parent" 2>/dev/null)
-    # Use parent name only if it looks like a project dir (not "." or root)
     if [[ -n "$candidate" && "$candidate" != "." && "$candidate" != "/" ]]; then
         repo_name="$candidate"
     else
@@ -36,14 +34,9 @@ if [[ -z "$repo_name" ]]; then
     fi
 fi
 
-# Sanitize: replace slashes and spaces with dashes
 repo_name=$(echo "$repo_name" | tr '/ ' '--' | tr -s '-')
-
-# Current branch
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/ ' '--' | tr -s '-') || branch="unknown"
 
-# Project naming: main/master/develop on any worktree → repo name only
-# Any other branch (typically non-main worktrees) → repo-branch
 main_branches=("main" "master" "develop" "dev")
 is_main_branch=false
 for mb in "${main_branches[@]}"; do
@@ -61,24 +54,165 @@ echo "Is worktree: $is_worktree"
 echo "Branch:      $branch"
 echo "Project:     $project_name"
 
+# ── Step 1: .serena/project.yml ───────────────────────────────────────────────
+
 serena_dir="$git_root/.serena"
 project_yml="$serena_dir/project.yml"
 
 if [[ -f "$project_yml" ]]; then
-    # Update existing project_name field
     if command -v sd &>/dev/null; then
         sd 'project_name:.*' "project_name: $project_name" "$project_yml"
     else
         sed -i "s/^project_name:.*/project_name: $project_name/" "$project_yml"
     fi
     echo "Updated:  $project_yml"
-    # Re-register with serena in case path changed
     "$SERENA_BIN" project create "$git_root" --name "$project_name" 2>/dev/null || true
 else
-    # Create new project config
     "$SERENA_BIN" project create "$git_root" --name "$project_name"
     echo "Created:  $project_yml"
 fi
+
+# ── Step 2: .mcp.json ─────────────────────────────────────────────────────────
+
+echo ""
+echo "Setting up .mcp.json..."
+
+mcp_file="$git_root/.mcp.json"
+existing="{}"
+[[ -f "$mcp_file" ]] && existing=$(cat "$mcp_file")
+
+# Ensure mcpServers key exists
+merged=$(echo "$existing" | jq 'if .mcpServers then . else .mcpServers = {} end')
+
+# ── serena ────────────────────────────────────────────────────────────────────
+serena_abs=$(realpath "$SERENA_BIN" 2>/dev/null || echo "$SERENA_BIN")
+if echo "$merged" | jq -e '.mcpServers.serena' > /dev/null 2>&1; then
+    echo "Exists:   serena (skipped)"
+else
+    merged=$(echo "$merged" | jq \
+        --arg cmd "$serena_abs" \
+        --arg project "$git_root" \
+        '.mcpServers.serena = {
+            "type": "stdio",
+            "command": $cmd,
+            "args": ["start-mcp-server", "--context", "claude-code", "--project", $project],
+            "env": {}
+        }')
+    echo "Added:    serena"
+fi
+
+# ── gsd-workflow ──────────────────────────────────────────────────────────────
+gsd_cli=$(which gsd 2>/dev/null || echo "$HOME/.local/share/mise/shims/gsd")
+node_bin=$(which node 2>/dev/null || echo "/usr/bin/node")
+gsd_executors="$HOME/.gsd/agent/extensions/gsd/tools/workflow-tool-executors.js"
+gsd_write_gate="$HOME/.gsd/agent/extensions/gsd/bootstrap/write-gate.js"
+
+# Find gsd-pi mcp-server: resolve gsd symlink → gsd-pi dir → packages/mcp-server/dist/cli.js
+gsd_mcp_server=""
+if [[ -x "$gsd_cli" ]]; then
+    gsd_real=$(realpath "$gsd_cli" 2>/dev/null || readlink -f "$gsd_cli" 2>/dev/null || "")
+    if [[ -n "$gsd_real" ]]; then
+        # gsd_real = .../node_modules/gsd-pi/dist/loader.js → go up 2 dirs to get gsd-pi root
+        gsd_pi_dir=$(dirname "$(dirname "$gsd_real")")
+        candidate="$gsd_pi_dir/packages/mcp-server/dist/cli.js"
+        [[ -f "$candidate" ]] && gsd_mcp_server="$candidate"
+    fi
+fi
+
+if [[ -n "$gsd_mcp_server" && -f "$gsd_executors" && -f "$gsd_write_gate" ]]; then
+    if echo "$merged" | jq -e '.mcpServers["gsd-workflow"]' > /dev/null 2>&1; then
+        echo "Exists:   gsd-workflow (skipped)"
+    else
+        merged=$(echo "$merged" | jq \
+            --arg node "$node_bin" \
+            --arg mcp_cli "$gsd_mcp_server" \
+            --arg gsd_cli_path "$gsd_cli" \
+            --arg executors "$gsd_executors" \
+            --arg write_gate "$gsd_write_gate" \
+            --arg project "$git_root" \
+            '.mcpServers["gsd-workflow"] = {
+                "command": $node,
+                "args": [$mcp_cli],
+                "cwd": $project,
+                "env": {
+                    "GSD_CLI_PATH": $gsd_cli_path,
+                    "GSD_WORKFLOW_EXECUTORS_MODULE": $executors,
+                    "GSD_WORKFLOW_WRITE_GATE_MODULE": $write_gate,
+                    "GSD_PERSIST_WRITE_GATE_STATE": "1",
+                    "GSD_WORKFLOW_PROJECT_ROOT": $project
+                }
+            }')
+        echo "Added:    gsd-workflow"
+    fi
+else
+    [[ -z "$gsd_mcp_server" ]] && echo "Skipped:  gsd-workflow (gsd-pi mcp-server not found)"
+    [[ ! -f "$gsd_executors" ]] && echo "Skipped:  gsd-workflow (missing $gsd_executors)"
+fi
+
+# ── codebase-memory-mcp ───────────────────────────────────────────────────────
+cbm_bin=$(which codebase-memory-mcp 2>/dev/null || echo "")
+if [[ -n "$cbm_bin" ]]; then
+    cbm_abs=$(realpath "$cbm_bin" 2>/dev/null || echo "$cbm_bin")
+    if echo "$merged" | jq -e '.mcpServers["codebase-memory-mcp"]' > /dev/null 2>&1; then
+        echo "Exists:   codebase-memory-mcp (skipped)"
+    else
+        merged=$(echo "$merged" | jq \
+            --arg cmd "$cbm_abs" \
+            --arg project "$git_root" \
+            '.mcpServers["codebase-memory-mcp"] = {
+                "type": "stdio",
+                "command": $cmd,
+                "args": ["--project-root", $project]
+            }')
+        echo "Added:    codebase-memory-mcp"
+        echo "Note:     Run index_repository once to build the code graph"
+    fi
+else
+    echo "Skipped:  codebase-memory-mcp (not installed — npm install -g codebase-memory-mcp)"
+fi
+
+# ── headroom ─────────────────────────────────────────────────────────────────
+headroom_bin=$(which headroom 2>/dev/null || echo "")
+if [[ -n "$headroom_bin" ]]; then
+    headroom_abs=$(realpath "$headroom_bin" 2>/dev/null || echo "$headroom_bin")
+    if echo "$merged" | jq -e '.mcpServers.headroom' > /dev/null 2>&1; then
+        echo "Exists:   headroom (skipped)"
+    else
+        merged=$(echo "$merged" | jq \
+            --arg cmd "$headroom_abs" \
+            '.mcpServers.headroom = {
+                "type": "stdio",
+                "command": $cmd,
+                "args": ["mcp", "serve"]
+            }')
+        echo "Added:    headroom (compress/retrieve/stats tools)"
+        echo "Note:     For full proxy compression: headroom proxy + ANTHROPIC_BASE_URL=http://127.0.0.1:8787"
+    fi
+else
+    echo "Skipped:  headroom (not installed — pip install 'headroom-ai[mcp]')"
+fi
+
+# ── context-mode ─────────────────────────────────────────────────────────────
+ctxmode_bin=$(which context-mode 2>/dev/null || echo "")
+if [[ -n "$ctxmode_bin" ]]; then
+    if echo "$merged" | jq -e '.mcpServers["context-mode"]' > /dev/null 2>&1; then
+        echo "Exists:   context-mode (skipped)"
+    else
+        merged=$(echo "$merged" | jq \
+            --arg cmd "$ctxmode_bin" \
+            '.mcpServers["context-mode"] = {
+                "command": $cmd
+            }')
+        echo "Added:    context-mode"
+    fi
+else
+    echo "Skipped:  context-mode (not installed)"
+fi
+
+echo "$merged" | jq '.' > "$mcp_file"
+echo "Written:  $mcp_file"
+
+# ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "Done. Serena project '$project_name' ready at $git_root"

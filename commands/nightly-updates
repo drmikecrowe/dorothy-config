@@ -35,4 +35,20 @@ fi
 # beads
 setup-util-beads
 
+# ── pnpm global packages ──────────────────────────────────────────────────────
+log "==> setup-node-global-utilities update"
+if command -v setup-node-global-utilities >/dev/null; then
+  setup-node-global-utilities update || log "WARN: setup-node-global-utilities returned non-zero"
+else
+  log "WARN: setup-node-global-utilities not found, skipping"
+fi
+
+# ── uv global tools ───────────────────────────────────────────────────────────
+log "==> setup-uv-global-utilities update"
+if command -v setup-uv-global-utilities >/dev/null; then
+  setup-uv-global-utilities update || log "WARN: setup-uv-global-utilities returned non-zero"
+else
+  log "WARN: setup-uv-global-utilities not found, skipping"
+fi
+
 log "==> done"

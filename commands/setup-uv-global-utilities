@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+
+function setup_uv_global_utilities() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# =====================================
+	# Configuration
+
+	source "$DOROTHY/sources/config.sh"
+
+	# setup.bash provides:
+	local UV_INSTALL=()
+	load_dorothy_config 'setup.bash'
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Setup global Python tools via uv tool install.
+
+			USAGE:
+			setup-uv-global-utilities [...options] [install|update|setup]
+
+			OPTIONS:
+			--configure
+			    Whether to prompt, confirm, or save configuration changes.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL
+	}
+
+	local item option_configure=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'setup') ;;
+		'update') option_configure='no' ;;
+		'install') option_configure='yes' ;;
+		'--no-configure'* | '--configure'*) __flag --source={item} --target={option_configure} --affirmative --coerce || return ;;
+		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
+		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
+		esac
+	done
+
+	if [[ ${#UV_INSTALL[@]} -eq 0 ]]; then
+		if [[ $option_configure == 'no' ]]; then
+			__print_style --dim='Setup of uv global tools skipped (no packages configured).' || return
+			return 0
+		elif ! confirm --linger --negative --ppid=$$ -- 'Setup uv global tools?'; then
+			return 0
+		fi
+	fi
+
+	# =====================================
+	# Start
+
+	__print_style --h1='Setup uv Global Tools' || return
+
+	# =====================================
+	# Ensure uv is available
+
+	__print_style --h2='Ensure uv' || return
+	if ! command-exists uv; then
+		if command-exists pacman; then
+			sudo pacman -S --noconfirm --needed uv
+		else
+			curl -LsSf https://astral.sh/uv/install.sh | sh
+		fi
+	fi
+	__print_style --g2='Ensure uv' || return
+
+	# =====================================
+	# Install/Update global tools
+
+	__print_style --h2='Global Tools (uv)' || return
+
+	if [[ $option_configure == 'no' ]]; then
+		# Update all installed tools
+		uv tool upgrade --all
+	else
+		# Install/reinstall all configured tools
+		for pkg in "${UV_INSTALL[@]}"; do
+			uv tool install --upgrade "$pkg"
+		done
+	fi
+
+	# Install any configured tools not yet installed
+	if [[ $option_configure != 'no' ]] || true; then
+		for pkg in "${UV_INSTALL[@]}"; do
+			if ! uv tool list 2>/dev/null | awk '{print $1}' | grep -qxF "$pkg"; then
+				uv tool install "$pkg"
+			fi
+		done
+	fi
+
+	__print_style --g2='Global Tools (uv)' || return
+
+	# =====================================
+	# Finish
+
+	__print_style --g1='Setup uv Global Tools' || return
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_uv_global_utilities "$@"
+fi

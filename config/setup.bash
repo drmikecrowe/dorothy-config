@@ -79,9 +79,6 @@ SETUP_UTILS=(
     1password-cli # 1Password CLI (op)
     gpg           # GPG
 
-    # Node global package manager
-    pnpm
-
     # Containers
     docker # Docker
 
@@ -100,7 +97,7 @@ SETUP_UTILS=(
     yt-dlp     # video downloader
 )
 
-SETUP_GLOBAL_PNPM_PACKAGES=(
+SETUP_GLOBAL_NPM_PACKAGES=(
     quicktype
     prettier
     markdownlint-cli2
@@ -112,6 +109,9 @@ SETUP_GLOBAL_PNPM_PACKAGES=(
     @vtsls/language-server
     typescript
     playwriter
+    csv2json
+    git-stack
+    context-mode
 )
 
 # =============================================================================
@@ -194,7 +194,18 @@ FLATPAK_APPS=(
 # UV_INSTALL - Python tools via uv (cross-platform)
 # =============================================================================
 UV_INSTALL=(
-    ruff # Python linter/formatter
+    ruff                         # Python linter/formatter
+    aider-chat                   # AI pair programmer
+    basedpyright                 # Python type checker
+    claude-conversation-extractor
+    compact-json                 # JSON formatter
+    copier                       # project templating
+    crawl4ai                     # web crawler/scraper
+    pyinfra                      # infrastructure automation
+    shell-gpt                    # ChatGPT/LLM shell assistant
+    # serena-agent               # git install: uvx --from git+https://github.com/oraios/serena
+    # shell-sage                 # custom install
+    "headroom-ai[all]"
 )
 
 # =============================================================================
@@ -203,40 +214,70 @@ UV_INSTALL=(
 # Only used on Arch/Manjaro, ignored on macOS
 AUR_INSTALL=(
     # Data tools
-    jless # JSON viewer
-    go-yq # YAML processor
-    xq    # XML processor
-    htmlq # HTML processor
+    jless  # JSON viewer
+    go-yq  # YAML processor
+    xq     # XML processor
+    htmlq  # HTML processor
 
     # CLI tools
     gping      # ping with graph
     prettyping # prettier ping
     bmon       # bandwidth monitor
     dua-cli    # disk usage
+    duf        # df replacement
+    glances    # system monitor (htop alternative)
+    trippy     # traceroute TUI
 
     # Utilities
-    rich-cli # rich text CLI
-    neofetch # system info
-    inxi     # system info
-    sysz     # systemctl TUI
-    rnr      # bulk rename
-    jwt-cli  # JWT tool
-    toml-cli # TOML processor
+    rich-cli        # rich text CLI
+    neofetch        # system info
+    inxi            # system info
+    sysz            # systemctl TUI
+    jwt-cli         # JWT tool
+    taplo-cli       # TOML toolkit (binary: taplo)
+    rclone          # cloud sync
+    ngrok           # tunnel
+    topgrade        # system-wide upgrader
+    speedtest-go-bin
+
+    # Shell
+    tmux   # terminal multiplexer
+    atuin  # shell history sync
 
     # File tools
-    mc     # midnight commander
-    fdupes # duplicate finder
-    rdfind # duplicate finder
-    atool  # archive tool
+    mc         # midnight commander
+    fdupes     # duplicate finder
+    rdfind     # duplicate finder
+    atool      # archive tool
+    ouch       # modern archive tool
+    hexyl      # hex viewer
+    broot      # interactive file browser
+    yazi       # terminal file manager
 
     # Dev tools
-    d2 # diagram tool
+    ast-grep               # AST-based search/rewrite
+    d2                     # diagram tool
     markdownlint-cli2
+    lazygit                # git TUI
+    goreleaser             # Go release tool
+    rustscan               # fast port scanner
+    onefetch               # git repo overview
+    stylua                 # lua formatter
+    typescript-language-server
+
+    # Dotfiles
+    chezmoi # dotfiles manager
+
+    # IaC
+    pulumi
 
     # Low-level
     evtest     # input testing
     ydotool    # automation
     ueberzugpp # image preview
+
+    # Media/misc
+    glow # markdown viewer (terminal)
 )
 
 # =============================================================================

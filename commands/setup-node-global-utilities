@@ -9,7 +9,7 @@ function setup_node_global_packages() (
 	source "$DOROTHY/sources/config.sh"
 
 	# setup.bash provides:
-	local SETUP_GLOBAL_PNPM_PACKAGES=()
+	local SETUP_GLOBAL_NPM_PACKAGES=()
 	load_dorothy_config 'setup.bash'
 
 	# =====================================
@@ -19,7 +19,7 @@ function setup_node_global_packages() (
 	function help {
 		cat <<-EOF >&2
 			ABOUT:
-			Setup global Node.js packages via pnpm.
+			Setup global Node.js packages via npm.
 
 			USAGE:
 			setup-node-global-packages [...options] [install|update|setup]
@@ -35,7 +35,7 @@ function setup_node_global_packages() (
 	}
 
 	# process
-	local item option_configure=''
+	local item option_configure='yes'
 	while [[ $# -ne 0 ]]; do
 		item="$1"
 		shift
@@ -52,13 +52,9 @@ function setup_node_global_packages() (
 	done
 
 	# check
-	if [[ ${#SETUP_GLOBAL_PNPM_PACKAGES[@]} -eq 0 ]]; then
-		if [[ $option_configure == 'no' ]]; then
-			__print_style --dim='Setup of Node.js global packages skipped (no packages configured).' || return
-			return 0
-		elif ! confirm --linger --negative --ppid=$$ -- 'Setup Node.js global packages?'; then
-			return 0
-		fi
+	if [[ ${#SETUP_GLOBAL_NPM_PACKAGES[@]} -eq 0 ]]; then
+		__print_style --dim='Setup of Node.js global packages skipped (no packages configured).' || return
+		return 0
 	fi
 
 	# =====================================
@@ -74,34 +70,19 @@ function setup_node_global_packages() (
 	__print_style --g2='Ensure Node.js' || return
 
 	# =====================================
-	# Ensure pnpm is installed
-
-	__print_style --h2='Ensure pnpm' || return
-	if ! command-exists pnpm; then
-		if command-exists pacman; then
-			sudo pacman -S --noconfirm --needed pnpm
-		else
-			# Fallback: install via npm
-			npm install -g pnpm
-		fi
-		pnpm setup
-	fi
-	__print_style --g2='Ensure pnpm' || return
-
-	# =====================================
 	# Install/Update global packages
 
-	if [[ ${#SETUP_GLOBAL_PNPM_PACKAGES[@]} -ne 0 ]]; then
-		__print_style --h2='Global Packages (pnpm)' || return
+	if [[ ${#SETUP_GLOBAL_NPM_PACKAGES[@]} -ne 0 ]]; then
+		__print_style --h2='Global Packages (npm)' || return
 
 		# Check if any packages are not already installed
 		local missing_packages=()
 		local installed_packages=()
 		if [[ $option_configure != 'yes' ]]; then
 			# Get currently installed global packages
-			mapfile -t installed_packages < <(pnpm list -g --depth=0 2>/dev/null | grep -E '^[a-z@]' | awk '{print $1}' || :)
+			mapfile -t installed_packages < <(npm list -g --depth=0 2>/dev/null | grep -E '^[├└]' | awk '{print $2}' | cut -d@ -f1 || :)
 
-			for pkg in "${SETUP_GLOBAL_PNPM_PACKAGES[@]}"; do
+			for pkg in "${SETUP_GLOBAL_NPM_PACKAGES[@]}"; do
 				# Extract package name without version (e.g. @google/gemini-cli@1.2.3 -> @google/gemini-cli)
 				local pkg_name="${pkg%%@*}"
 				if [[ ! " ${installed_packages[*]} " =~ " ${pkg_name} " ]]; then
@@ -114,21 +95,21 @@ function setup_node_global_packages() (
 		if [[ $option_configure == 'yes' ]] || [[ ${#missing_packages[@]} -ne 0 ]]; then
 			if [[ $option_configure == 'yes' ]]; then
 				# Install all configured packages
-				pnpm add -g "${SETUP_GLOBAL_PNPM_PACKAGES[@]}"
+				npm install -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
 			else
 				# Install only missing packages
 				if [[ ${#missing_packages[@]} -ne 0 ]]; then
-					pnpm add -g "${missing_packages[@]}"
+					npm install -g "${missing_packages[@]}"
 				fi
 			fi
 		fi
 
 		# Update existing packages
 		if [[ $option_configure == 'no' ]]; then
-			pnpm update -g "${SETUP_GLOBAL_PNPM_PACKAGES[@]}"
+			npm update -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
 		fi
 
-		__print_style --g2='Global Packages (pnpm)' || return
+		__print_style --g2='Global Packages (npm)' || return
 	fi
 
 	# =====================================

@@ -51,6 +51,7 @@ if [ -n "$BASH_VERSION" ] || [ -n "$ZSH_VERSION" ]; then
 fi
 
 alias lg='lazygit'
+alias toml-cli='taplo'
 
 # Override Manjaro's interactive cp alias
 alias cp='cp'
@@ -63,8 +64,12 @@ if [ -n "$BASH_VERSION" ] || [ -n "$ZSH_VERSION" ]; then
   export LD_LIBRARY_PATH=/opt/cuda/lib64:$LD_LIBRARY_PATH
 fi
 
-# pnpm PATH
+# pnpm PATH — shims in $PNPM_HOME, pnpm CLI itself in $PNPM_HOME/bin (pnpm v11+)
 case ":$PATH:" in
 *":$PNPM_HOME:"*) ;;
 *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+case ":$PATH:" in
+*":$PNPM_HOME/bin:"*) ;;
+*) export PATH="$PNPM_HOME/bin:$PATH" ;;
 esac

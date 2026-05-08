@@ -14,9 +14,11 @@ command -v gsd >/dev/null || {
 # Fetch with `op read` instead of `op run` — `op run` pipes child stdout
 # through its secret-scrubber, which breaks TTY detection and forces gsd
 # into non-interactive mode.
+PAI_API_TOKEN="$(op read "op://MikkelTech/PAI_API_TOKEN/credential")"
 BRAVE_API_KEY="$(op read "op://Private/BRAVE_API_KEY/credential")"
 ZAI_API_KEY="$(op read "op://Private/ZAI_API_KEY/credential")"
 export BRAVE_API_KEY
 export ZAI_API_KEY
+export PAI_API_TOKEN
 
 exec gsd "$@"
