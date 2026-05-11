@@ -1,2 +1,8 @@
 commands.local/
 config.local/
+
+# runtime artifacts
+.bg-shell/
+.gsd/
+commands/.bg-shell/
+commands/.gsd/

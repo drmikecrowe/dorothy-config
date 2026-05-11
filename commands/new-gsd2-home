@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# Clone the current ~/.gsd/ to a new GSD home for a different provider/model config.
+#
+# Usage:
+#   new-gsd2-home DEST             # e.g. new-gsd2-home ~/.gsd-privateai
+#   new-gsd2-home -n DEST          # dry run
+#   new-gsd2-home -h               # help
+#
+# Copies config files, excludes runtime/state. You then set GSD_HOME=<dest>
+# (or symlink) to use the new home with different models.json / PREFERENCES.md.
+
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+new-gsd2-home — clone ~/.gsd/ config to a new GSD home
+
+Usage:
+  new-gsd2-home [-n] DEST
+
+Options:
+  -n    dry run (show what would be copied)
+  -h    show this help
+
+Result:
+  DEST/ created with:
+    - agent/          (settings, models, auth, onboarding, workflow docs)
+    - extensions/     (registry)
+    - defaults.json
+    - PREFERENCES.md
+    - PREFERENCES-*.md (all named profiles)
+
+  Excluded (runtime/state, regenerated on first use):
+    - sessions/       (chat logs)
+    - projects/       (repo-to-hash mappings)
+    - crash/          (crash logs)
+    - .bg-shell/      (background shell state)
+    - .gsd/           (nested runtime)
+    - .update-check   (timestamp)
+
+After copying, edit DEST/agent/models.json and DEST/PREFERENCES.md
+for the new provider's models, then launch with:
+  GSD_HOME=DEST pi
+EOF
+}
+
+DRY_RUN=false
+
+while getopts "nh" opt; do
+  case "$opt" in
+    n) DRY_RUN=true ;;
+    h) usage; exit 0 ;;
+    *) usage; exit 1 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+DEST="${1:-}"
+if [[ -z "$DEST" ]]; then
+  echo "ERROR: destination argument required" >&2
+  usage >&2
+  exit 1
+fi
+
+SRC="$HOME/.gsd"
+
+if [[ ! -d "$SRC" ]]; then
+  echo "ERROR: $SRC does not exist" >&2
+  exit 1
+fi
+
+# Resolve to absolute path
+DEST="$(cd "$(dirname "$DEST")" 2>/dev/null && pwd)/$(basename "$DEST")" || {
+  # Parent doesn't exist yet — resolve what we can
+  DEST="$(realpath -m "$DEST" 2>/dev/null || echo "$DEST")"
+}
+
+if [[ -d "$DEST" ]]; then
+  echo "ERROR: $DEST already exists" >&2
+  exit 1
+fi
+
+echo "==> Source:      $SRC"
+echo "==> Destination: $DEST"
+echo
+
+# Files and dirs to copy
+COPY_ITEMS=(
+  agent/
+  extensions/
+  defaults.json
+  PREFERENCES.md
+  PREFERENCES-claude.md
+  PREFERENCES-privateai.md
+  PREFERENCES-zai.md
+)
+
+# Verify all copy items exist in source
+MISSING=()
+for item in "${COPY_ITEMS[@]}"; do
+  if [[ ! -e "$SRC/$item" ]]; then
+    MISSING+=("$item")
+  fi
+done
+
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+  echo "WARN: missing in source (skipping): ${MISSING[*]}"
+  echo
+fi
+
+if $DRY_RUN; then
+  echo "==> DRY RUN — would copy:"
+  for item in "${COPY_ITEMS[@]}"; do
+    if [[ -e "$SRC/$item" ]]; then
+      echo "    $item"
+    fi
+  done
+  echo
+  echo "==> After copy, edit these files for the new provider:"
+  echo "    $DEST/agent/models.json    — provider definitions, base URLs, model IDs"
+  echo "    $DEST/agent/auth.json       — auth method per provider"
+  echo "    $DEST/agent/settings.json   — defaultProvider, defaultModel"
+  echo "    $DEST/PREFERENCES.md        — model role assignments, prefs"
+  echo
+  echo "==> Then launch with: GSD_HOME=$DEST pi"
+  exit 0
+fi
+
+# Create destination
+mkdir -p "$DEST"
+
+# Copy items
+COPIED=0
+for item in "${COPY_ITEMS[@]}"; do
+  if [[ ! -e "$SRC/$item" ]]; then
+    continue
+  fi
+  cp -a "$SRC/$item" "$DEST/$item"
+  COPIED=$((COPIED + 1))
+  echo "    copied $item"
+done
+
+echo
+echo "OK. $COPIED items copied to $DEST"
+echo
+echo "==> Next steps:"
+echo "    1. Edit $DEST/agent/models.json    (provider defs, URLs, model IDs)"
+echo "    2. Edit $DEST/agent/auth.json       (auth method if different)"
+echo "    3. Edit $DEST/agent/settings.json   (defaultProvider, defaultModel)"
+echo "    4. Edit $DEST/PREFERENCES.md        (model roles by phase, prefs)"
+echo "    5. Launch: GSD_HOME=$DEST pi"

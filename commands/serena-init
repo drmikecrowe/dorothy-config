@@ -212,6 +212,26 @@ fi
 echo "$merged" | jq '.' > "$mcp_file"
 echo "Written:  $mcp_file"
 
+# ── Step 3: Index ─────────────────────────────────────────────────────────────
+
+echo ""
+echo "Indexing project symbols..."
+
+echo "  [serena] indexing $git_root ..."
+"$SERENA_BIN" project index "$git_root" && echo "  [serena] done" || echo "  [serena] index failed (non-fatal)"
+
+cbm_bin=$(which codebase-memory-mcp 2>/dev/null || echo "")
+if [[ -n "$cbm_bin" ]]; then
+    echo "  [codebase-memory-mcp] indexing $git_root ..."
+    "$cbm_bin" cli index_repository "{\"repo_path\": \"$git_root\"}" \
+        && echo "  [codebase-memory-mcp] done" \
+        || echo "  [codebase-memory-mcp] index failed (non-fatal)"
+else
+    echo "  [codebase-memory-mcp] skipped (not installed)"
+fi
+
+# context-mode has no CLI indexing — handled by MCP tools at runtime
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# op-inject-env: resolve all 1password.env secrets in one op inject call
+# Usage: eval "$(op-inject-env)"
+#
+# Reads config.local/1password.env, strips "export " prefix, runs op inject
+# on the resulting KEY=op://... template, and outputs export statements.
+set -euo pipefail
+
+ENV_FILE="${DOROTHY_1PASSWORD_ENV:-${BASH_SOURCE[0]%/*}/../config.local/1password.env}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+	echo "ERROR: $ENV_FILE not found. Run rebuild-1password-env first." >&2
+	exit 1
+fi
+
+# Write KEY=op://... template to temp file (no "export " prefix)
+tmpfile=$(mktemp)
+trap 'rm -f "$tmpfile"' EXIT
+sed 's/^export //' "$ENV_FILE" > "$tmpfile"
+
+# Single roundtrip — resolves every op:// reference at once
+injected=$(op inject -i "$tmpfile")
+
+# Output eval-safe export statements
+while IFS= read -r line; do
+	[[ "$line" == *=* ]] || continue
+	printf 'export %s\n' "$line"
+done <<< "$injected"

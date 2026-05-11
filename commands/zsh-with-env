@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# zsh-with-env: run zsh with environment injected from 1Password or varlock
+set -euo pipefail
+
+command -v op >/dev/null || { echo "ERROR: op (1Password CLI) required" >&2; exit 1; }
+
+# Check if .env.schema exists in the current directory
+if [ -f ".env.schema" ]; then
+    # Run with varlock if schema is present
+    exec varlock run --no-redact-stdout --  zsh "$@"
+else
+    # Inject 1Password secrets into the environment first
+    eval "$(op-inject-env)"
+
+    # Fallback to standard execution
+    exec zsh "$@"
+fi
+
