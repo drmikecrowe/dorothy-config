@@ -63,14 +63,15 @@ function setup_uv_global_utilities() (
 	__print_style --h1='Setup uv Global Tools' || return
 
 	# =====================================
-	# Ensure uv is available
+	# Ensure uv is available via mise
 
 	__print_style --h2='Ensure uv' || return
 	if ! command-exists uv; then
-		if command-exists pacman; then
-			sudo pacman -S --noconfirm --needed uv
+		if command-exists mise; then
+			mise install uv
 		else
-			curl -LsSf https://astral.sh/uv/install.sh | sh
+			__print_error 'uv not found and mise is not available'
+			return 1
 		fi
 	fi
 	__print_style --g2='Ensure uv' || return

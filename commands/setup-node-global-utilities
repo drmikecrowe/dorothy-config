@@ -63,10 +63,17 @@ function setup_node_global_packages() (
 	__print_style --h1='Setup Node.js Global Packages' || return
 
 	# =====================================
-	# Ensure Node.js is installed
+	# Ensure Node.js is available via mise
 
 	__print_style --h2='Ensure Node.js' || return
-	setup-util-node --upgrade --no-quiet
+	if ! command-exists node; then
+		if command-exists mise; then
+			mise install node
+		else
+			__print_error 'node not found and mise is not available'
+			return 1
+		fi
+	fi
 	__print_style --g2='Ensure Node.js' || return
 
 	# =====================================
