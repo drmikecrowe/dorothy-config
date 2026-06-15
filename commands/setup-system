@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+# Local override: extends Dorothy's core setup-system with user-specific steps.
+# Calls the core command as a subprocess (clean, no rename tricks).
+
+function setup_system() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# Parse action before handing off
+	local action=''
+	for arg in "$@"; do
+		case "$arg" in
+		install | update | clean) action="$arg" ;;
+		esac
+	done
+
+	# Run Dorothy core setup-system
+	bash "$DOROTHY/commands/setup-system" "$@"
+
+	# =====================================
+	# User extras (install + update only)
+
+	if [[ $action =~ ^(install|update)$ ]]; then
+
+		# CLI tools not covered by SETUP_UTILS
+		__print_style --h2='CLI Tools (extras)' || return
+		setup-cli-tools "$action"
+		__print_style --g2='CLI Tools (extras)' || return
+
+		# Node.js global packages
+		__print_style --h2='Node.js Global Packages' || return
+		setup-node-global-utilities "$action"
+		__print_style --g2='Node.js Global Packages' || return
+
+		# Python tools via uv
+		__print_style --h2='uv Global Tools' || return
+		setup-uv-global-utilities "$action"
+		__print_style --g2='uv Global Tools' || return
+
+		# mise: upgrade all managed runtimes on update
+		if [[ $action == 'update' ]] && command-exists mise; then
+			__print_style --h2='mise upgrade' || return
+			mise upgrade -y
+			__print_style --g2='mise upgrade' || return
+		fi
+
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_system "$@"
+fi

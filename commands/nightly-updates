@@ -35,6 +35,15 @@ fi
 # ── beads ─────────────────────────────────────────────────────────────────────
 obs_run_warn "setup-util-beads" setup-util-beads
 
+# ── CLI tools (extras not in SETUP_UTILS) ────────────────────────────────────
+log "==> setup-cli-tools update"
+if command -v setup-cli-tools >/dev/null; then
+	obs_run_warn "setup-cli-tools" setup-cli-tools update
+else
+	log "WARN: setup-cli-tools not found, skipping"
+	obs_note "setup-cli-tools" "Not found, skipped."
+fi
+
 # ── node global packages ──────────────────────────────────────────────────────
 log "==> setup-node-global-utilities update"
 if command -v setup-node-global-utilities >/dev/null; then
