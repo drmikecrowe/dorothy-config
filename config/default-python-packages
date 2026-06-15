@@ -1,0 +1,12 @@
+textual
+rich
+PyYAML
+requests
+python-benedict
+jsondiff
+openpyxl
+poetry-core
+setuptools
+toml
+tomli-w
+click

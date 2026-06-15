@@ -1,0 +1,7 @@
+# Trusted SHA256 hashes for curl-pipe-bash install scripts.
+# Updated automatically when a new or changed script is reviewed and approved.
+# Format: name=sha256hash  (one per line, # for comments)
+caveman=8ddef49c15f089c26affed3c31d97142c683e1d37a1499ae557281ca09c2712c
+agent-of-empires=35370deeddbba403ca1a2d406aa39163f3363835f7b6870fe4e685e0792a2577
+rtk=ab22d109f920db7d931ef6aa97d9460d93f41d296981db8446afed96ea9661e5
+codebase-memory-mcp=d933fe150bfd2f2e002dfba91fb1b9634893e06979dd53f4aa8f5702a8fdf4e7

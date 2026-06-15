@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# Manage the WinApps Windows VM (Podman backend)
+# Usage: winapps-vm [start|stop|restart|status|logs]
+
+function winapps_vm() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local compose_file="$HOME/.config/winapps/compose.yaml"
+
+	if [[ ! -f "$compose_file" ]]; then
+		echo-style --error="compose.yaml not found at $compose_file" >&2
+		echo-style --notice='Run setup-util-winapps first, then follow the Podman VM guide.' >&2
+		return 1
+	fi
+
+	local cmd="${1:-status}"
+	shift || true
+
+	case "$cmd" in
+		start)
+			echo-style --h2='Starting WinApps Windows VM'
+			podman-compose --file "$compose_file" start "$@"
+			;;
+		stop)
+			echo-style --h2='Stopping WinApps Windows VM'
+			podman-compose --file "$compose_file" stop "$@"
+			;;
+		restart)
+			echo-style --h2='Restarting WinApps Windows VM'
+			podman-compose --file "$compose_file" stop "$@"
+			podman-compose --file "$compose_file" start "$@"
+			;;
+		up)
+			echo-style --h2='Creating and starting WinApps Windows VM'
+			# --podman-run-args needed for rootless podman to access /dev/kvm
+			podman-compose --file "$compose_file" \
+				--podman-run-args '--group-add keep-groups' \
+				up --detach "$@"
+			echo-style --notice='Windows VNC installer available at http://127.0.0.1:8006'
+			;;
+		down)
+			echo-style --h2='Removing WinApps Windows VM'
+			podman-compose --file "$compose_file" down "$@"
+			;;
+		pause)
+			echo-style --h2='Pausing WinApps Windows VM'
+			podman-compose --file "$compose_file" pause "$@"
+			;;
+		unpause|resume)
+			echo-style --h2='Resuming WinApps Windows VM'
+			podman-compose --file "$compose_file" unpause "$@"
+			;;
+		kill)
+			echo-style --h2='Force-stopping WinApps Windows VM'
+			podman-compose --file "$compose_file" kill "$@"
+			;;
+		status)
+			podman-compose --file "$compose_file" ps "$@"
+			;;
+		logs)
+			podman-compose --file "$compose_file" logs --follow "$@"
+			;;
+		*)
+			echo-style --error="Unknown command: $cmd" >&2
+			echo-style 'Usage: winapps-vm [start|stop|restart|up|down|pause|unpause|kill|status|logs]' >&2
+			return 1
+			;;
+	esac
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	winapps_vm "$@"
+fi

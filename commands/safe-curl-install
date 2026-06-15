@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Sourced library — provides safe_curl_install.
+#
+# Usage:
+#   source "$(command -v safe-curl-install)"
+#   safe_curl_install caveman https://raw.githubusercontent.com/.../install.sh
+#
+# First run: downloads, shows preview, prompts, saves hash on approval.
+# Subsequent runs: verifies hash matches — aborts if changed, prompts re-review.
+
+_CURL_HASH_FILE="${CURL_HASH_FILE:-$HOME/.config/dorothy/config/curl-install-hashes}"
+
+_curl_load_hash() {
+	local name="$1"
+	[[ -f "$_CURL_HASH_FILE" ]] || return 0
+	grep -E "^${name}=" "$_CURL_HASH_FILE" | cut -d= -f2- | tail -1
+}
+
+_curl_save_hash() {
+	local name="$1" hash="$2"
+	touch "$_CURL_HASH_FILE"
+	if grep -qE "^${name}=" "$_CURL_HASH_FILE"; then
+		sed -i "s|^${name}=.*|${name}=${hash}|" "$_CURL_HASH_FILE"
+	else
+		echo "${name}=${hash}" >>"$_CURL_HASH_FILE"
+	fi
+}
+
+safe_curl_install() {
+	local name="$1" url="$2"
+	local tmp
+	tmp=$(mktemp "/tmp/install-${name}-XXXXXX.sh")
+	# shellcheck disable=SC2064
+	trap "rm -f '$tmp'" RETURN
+
+	echo "==> Downloading $name..."
+	if ! curl -fsSL "$url" -o "$tmp"; then
+		echo "ERROR: Failed to download $url" >&2
+		return 1
+	fi
+
+	local actual_hash
+	actual_hash=$(sha256sum "$tmp" | cut -d' ' -f1)
+
+	local stored_hash
+	stored_hash=$(_curl_load_hash "$name")
+
+	if [[ -z "$stored_hash" ]]; then
+		echo ""
+		echo "╔══ NEW SCRIPT: $name ══════════════════════════════════════════"
+		echo "║  URL:    $url"
+		echo "║  SHA256: $actual_hash"
+		echo "╠══ First 60 lines ═════════════════════════════════════════════"
+		head -60 "$tmp" | sed 's/^/║  /'
+		echo "╚═══════════════════════════════════════════════════════════════"
+		echo ""
+		read -r -p "Execute and trust this script? [y/N] " _confirm
+		if [[ "$_confirm" != [yY] ]]; then
+			echo "Skipped: $name"
+			return 1
+		fi
+		_curl_save_hash "$name" "$actual_hash"
+
+	elif [[ "$actual_hash" != "$stored_hash" ]]; then
+		echo ""
+		echo "╔══ SCRIPT CHANGED: $name ══════════════════════════════════════"
+		echo "║  URL:      $url"
+		echo "║  Expected: $stored_hash"
+		echo "║  Got:      $actual_hash"
+		echo "╠══ Current script (first 60 lines) ════════════════════════════"
+		head -60 "$tmp" | sed 's/^/║  /'
+		echo "╚═══════════════════════════════════════════════════════════════"
+		echo ""
+		echo "Script may have been legitimately updated OR tampered with." >&2
+		echo "Review in full: cat $tmp" >&2
+		echo ""
+		read -r -p "Trust new version and update saved hash? [y/N] " _confirm
+		if [[ "$_confirm" != [yY] ]]; then
+			echo "BLOCKED: $name — hash mismatch, not executed" >&2
+			if declare -f obs_alert >/dev/null 2>&1; then
+				obs_alert "BLOCKED: $name install script hash changed — manual review required. URL: $url"
+			fi
+			return 1
+		fi
+		_curl_save_hash "$name" "$actual_hash"
+	fi
+
+	echo "==> Executing $name..."
+	bash "$tmp"
+}

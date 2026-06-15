@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+
+# WinApps — run Windows apps seamlessly on Linux via Podman + FreeRDP
+# https://github.com/winapps-org/winapps
+
+function setup_util_winapps() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# --------------------------------
+	# Install system dependencies
+
+	if is-system --arch; then
+		setup-util --quiet \
+			--name='WinApps dependencies' \
+			PACMAN='curl' \
+			PACMAN='dialog' \
+			PACMAN='freerdp' \
+			PACMAN='git' \
+			PACMAN='iproute2' \
+			PACMAN='libnotify' \
+			PACMAN='openbsd-netcat' \
+			PACMAN='podman' \
+			PACMAN='podman-compose'
+	elif is-apt; then
+		setup-util --quiet \
+			--name='WinApps dependencies' \
+			APT='curl' \
+			APT='dialog' \
+			APT='freerdp3-x11' \
+			APT='git' \
+			APT='iproute2' \
+			APT='libnotify-bin' \
+			APT='netcat-openbsd' \
+			APT='podman' \
+			APT='podman-compose'
+	elif __command_exists -- dnf; then
+		setup-util --quiet \
+			--name='WinApps dependencies' \
+			DNF='curl' \
+			DNF='dialog' \
+			DNF='freerdp' \
+			DNF='git' \
+			DNF='iproute' \
+			DNF='libnotify' \
+			DNF='nmap-ncat' \
+			DNF='podman' \
+			DNF='podman-compose'
+	else
+		echo-style --error='Unsupported distro — install deps manually.' >&2
+		return 1
+	fi
+
+	# --------------------------------
+	# Bootstrap config (Podman defaults) — MUST exist before installer runs
+
+	local config_dir="$HOME/.config/winapps"
+	local config_file="$config_dir/winapps.conf"
+
+	if [[ ! -f "$config_file" ]]; then
+		echo-style --h2='Creating starter config'
+		mkdir -p -- "$config_dir"
+		cat > "$config_file" <<-'EOF'
+			RDP_USER="MyWindowsUser"
+			RDP_PASS="MyWindowsPassword"
+			RDP_DOMAIN=""
+			RDP_IP="127.0.0.1"
+			RDP_PORT="3389"
+			WAFLAVOR="podman"
+			RDP_SCALE="100"
+			REMOVABLE_MEDIA="/run/media"
+			RDP_FLAGS="/cert:tofu /sound /microphone +home-drive"
+			DEBUG="true"
+			AUTOPAUSE="off"
+			AUTOPAUSE_TIME="300"
+			FREERDP_COMMAND=""
+		EOF
+		chmod 600 -- "$config_file"
+		echo-style --notice="Config written to $config_file — edit RDP_USER and RDP_PASS before use."
+	else
+		echo-style --notice="Config already exists at $config_file — skipping."
+	fi
+
+	# --------------------------------
+	# Download compose.yaml (required to boot the Windows VM)
+
+	local compose_file="$config_dir/compose.yaml"
+	if [[ ! -f "$compose_file" ]]; then
+		echo-style --h2='Downloading compose.yaml'
+		curl --silent --location \
+			'https://raw.githubusercontent.com/winapps-org/winapps/main/compose.yaml' \
+			--output "$compose_file"
+		echo-style --notice="compose.yaml written to $compose_file"
+	else
+		echo-style --notice="compose.yaml already exists at $compose_file — skipping."
+	fi
+
+	# --------------------------------
+	# Install WinApps
+
+	if __command_exists -- winapps; then
+		echo-style --notice='WinApps already installed — skipping.'
+	else
+		echo-style --h2='Installing WinApps'
+		bash <(curl --silent --location \
+			https://raw.githubusercontent.com/winapps-org/winapps/main/setup.sh)
+	fi
+
+	# --------------------------------
+	# Symlink winapps binary onto PATH
+
+	local winapps_bin="$HOME/.local/bin/winapps-src/bin/winapps"
+	local winapps_link="$HOME/.local/bin/winapps"
+	if [[ -f "$winapps_bin" && ! -e "$winapps_link" ]]; then
+		ln -sf -- "$winapps_bin" "$winapps_link"
+		echo-style --notice="Symlinked winapps to $winapps_link"
+	fi
+
+	# --------------------------------
+	# Next steps hint
+
+	echo-style \
+		$'\n' \
+		--h2='Next steps' \
+		$'\n' \
+		'1. Edit ' --code="$config_file" ' — set RDP_USER and RDP_PASS' $'\n' \
+		'2. Optionally edit ' --code="$compose_file" ' — tune RAM_SIZE, CPU_CORES, VERSION' $'\n' \
+		'3. Run ' --code='winapps-vm up' ' — boots Windows, opens VNC at http://127.0.0.1:8006' $'\n' \
+		'4. Complete Windows setup in browser, then run ' --code='winapps' ' to scan installed apps'
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_winapps "$@"
+fi

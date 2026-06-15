@@ -1,23 +1,75 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Force-reinstall default Python packages for current mise Python version and run audit.
+# Mise handles this automatically on `mise install python` -- run this manually to force a refresh.
+# When invoked standalone, logs to Obsidian. When called from nightly-updates, logging is handled there.
 
-echo "🐍 Managing Python global packages..."
+set -euo pipefail
 
-# Reinstall all pipx packages (fixes interpreter issues when Python versions change)
-echo "📦 Reinstalling pipx packages..."
-pipx reinstall-all
+PACKAGES_FILE="$HOME/.config/dorothy/config/default-python-packages"
 
-# Force reinstall of default Python packages for current mise Python version
-# This ensures packages are available even when switching Python versions
-echo "🔄 Ensuring default Python packages are installed..."
-PYTHON_VERSION=$(mise current python)
-echo "Using Python version: $PYTHON_VERSION"
-
-# Read the default packages file and install them
-if [ -f ~/.default-python-packages ]; then
-    echo "📋 Installing packages from ~/.default-python-packages..."
-    mise exec python -- python -m pip install --upgrade $(cat ~/.default-python-packages | tr '\n' ' ')
-else
-    echo "⚠️  ~/.default-python-packages not found"
+if [[ ! -f "$PACKAGES_FILE" ]]; then
+	echo "ERROR: $PACKAGES_FILE not found" >&2
+	exit 1
 fi
 
-echo "✅ Python global package management complete!"
+_standalone=false
+if [[ -z "${_OBS_LOG_FILE:-}" ]]; then
+	_standalone=true
+	# shellcheck source=/dev/null
+	source "$(command -v obsidian-log)"
+	obs_init "python-global-packages"
+fi
+
+_run() {
+	local label="$1"; shift
+	if [[ "$_standalone" == true ]]; then
+		obs_run_warn "$label" "$@"
+	else
+		echo "==> $label"
+		"$@" || echo "WARN: $label returned non-zero"
+	fi
+}
+
+# pipx is optional — only run if installed (uv-managed tools don't need pipx)
+if command -v pipx >/dev/null 2>&1; then
+	_run "pipx reinstall-all" pipx reinstall-all
+else
+	echo "INFO: pipx not installed (uv-managed tools), skipping pipx reinstall-all"
+fi
+
+_run "pip upgrade" mise exec python -- python -m pip install --upgrade pip --quiet
+
+_run "pip install default packages" \
+	mise exec python -- python -m pip install --upgrade \
+	$(tr '\n' ' ' <"$PACKAGES_FILE")
+
+# pip-audit: prefer the uv-installed binary, fall back to mise python module
+if command -v pip-audit >/dev/null 2>&1; then
+	audit_output=$(pip-audit 2>&1) || {
+		echo "$audit_output"
+		if [[ "$_standalone" == true ]]; then
+			obs_alert "pip-audit found vulnerabilities"
+		fi
+	}
+	echo "$audit_output"
+	if [[ "$_standalone" == true ]]; then
+		obs_note "pip-audit" "$audit_output"
+	fi
+elif mise exec python -- python -m pip show pip-audit &>/dev/null 2>&1; then
+	audit_output=$(mise exec python -- python -m pip_audit 2>&1) || {
+		echo "$audit_output"
+		if [[ "$_standalone" == true ]]; then
+			obs_alert "pip-audit found vulnerabilities"
+		fi
+	}
+	echo "$audit_output"
+	if [[ "$_standalone" == true ]]; then
+		obs_note "pip-audit" "$audit_output"
+	fi
+else
+	echo "WARN: pip-audit not installed. Install via: setup-util-security-scanners or uv tool install pip-audit"
+fi
+
+if [[ "$_standalone" == true ]]; then
+	obs_finish
+fi

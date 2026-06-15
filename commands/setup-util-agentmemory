@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-agentmemory
+# Purpose: Install agentmemory MCP server and configure systemd user service
+# https://github.com/rohitg00/agentmemory
+
+set -euo pipefail
+
+# --- 1. Install agentmemory via npm ---
+if command -v agentmemory &>/dev/null; then
+    _am_ver=$(npm list -g --depth=0 2>/dev/null | grep -o '@agentmemory/agentmemory@[^ ]*' | grep -o '[0-9][0-9.]*$' || echo 'unknown')
+    echo "agentmemory is already installed: ${_am_ver}"
+else
+    echo "Installing agentmemory..."
+    npm install -g @agentmemory/agentmemory @agentmemory/mcp
+fi
+
+# --- 2. Install iii ---
+III_VERSION="0.11.2"
+III_BIN="$HOME/.local/bin/iii"
+mkdir -p "$HOME/.local/bin"
+if [[ -x "$III_BIN" ]]; then
+    echo "iii is already installed: $($III_BIN --version 2>/dev/null || echo 'unknown version')"
+else
+    echo "Installing iii ${III_VERSION}..."
+    curl -fsSL "https://github.com/iii-hq/iii/releases/download/iii/v${III_VERSION}/iii-x86_64-unknown-linux-gnu.tar.gz" \
+        | tar -xz -C "$HOME/.local/bin"
+    chmod +x "$III_BIN"
+    echo "iii installed: $($III_BIN --version)"
+fi
+
+# --- 2b. Patch iii-config.yaml — remove dev-only iii-exec worker ---
+# iii-exec watches src/**/*.ts and crashes when run outside the agentmemory
+# source tree (WorkingDirectory=%h has no src/). Must re-apply after upgrades.
+_iii_cfg=$(npm root -g 2>/dev/null)/@agentmemory/agentmemory/dist/iii-config.yaml
+if [[ -f "$_iii_cfg" ]] && grep -q 'iii-exec' "$_iii_cfg"; then
+    echo "Patching iii-config.yaml: removing iii-exec worker..."
+    # Strip from '  - name: iii-exec' through its config block (4 lines)
+    python3 -c "
+import re, pathlib
+p = pathlib.Path('$_iii_cfg')
+txt = p.read_text()
+txt = re.sub(r'  - name: iii-exec\n    config:\n      watch:\n        - src/\*\*/\*\.ts\n      exec:\n        - node dist/index\.mjs\n', '', txt)
+p.write_text(txt)
+"
+    echo "Patched."
+fi
+
+# --- 3. Init config dir (~/.agentmemory/.env) ---
+if [[ ! -f "$HOME/.agentmemory/.env" ]]; then
+    echo "Initialising agentmemory config..."
+    agentmemory init
+fi
+
+# --- 5. Write systemd user service ---
+SERVICE_DIR="$HOME/.config/systemd/user"
+SERVICE_FILE="$SERVICE_DIR/agentmemory.service"
+
+mkdir -p "$SERVICE_DIR"
+
+if [[ ! -f "$SERVICE_FILE" ]]; then
+    echo "Writing $SERVICE_FILE..."
+    cat > "$SERVICE_FILE" <<'EOF'
+[Unit]
+Description=agentmemory server
+After=network.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/share/mise/installs/node/24/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/mise/installs/node/24/bin/agentmemory
+
+StandardOutput=journal
+StandardError=journal
+
+EnvironmentFile=%h/.agentmemory/.env
+
+WorkingDirectory=%h
+
+Restart=on-failure
+RestartSec=10
+
+# Cap memory; iii-engine + node + embedding model can grow
+MemoryMax=4G
+
+[Install]
+WantedBy=default.target
+EOF
+else
+    echo "$SERVICE_FILE already exists, skipping"
+fi
+
+# --- 7. Enable and start service ---
+echo "Enabling and starting agentmemory service..."
+systemctl --user daemon-reload
+systemctl --user enable --now agentmemory.service
+
+# --- 8. Verify ---
+sleep 3
+if systemctl --user is-active --quiet agentmemory.service; then
+    echo "agentmemory is running."
+else
+    echo "WARNING: agentmemory not responding yet — check: systemctl --user status agentmemory.service"
+fi
+echo "Installed binaries:"
+command -v agentmemory iii 2>&1 || true

@@ -91,22 +91,30 @@ function setup_node_global_packages() (
 			done
 		fi
 
+		# Use socket npm wrapper when available for supply chain protection.
+		local npm_cmd='npm'
+		if command -v socket >/dev/null 2>&1; then
+			npm_cmd='socket npm'
+		else
+			__print_style --dim='socket not installed — using plain npm. Run setup-util-security-scanners to enable supply chain scanning.' || :
+		fi
+
 		# Only install if configure=yes or there are missing packages
 		if [[ $option_configure == 'yes' ]] || [[ ${#missing_packages[@]} -ne 0 ]]; then
 			if [[ $option_configure == 'yes' ]]; then
 				# Install all configured packages
-				npm install -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
+				$npm_cmd install -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
 			else
 				# Install only missing packages
 				if [[ ${#missing_packages[@]} -ne 0 ]]; then
-					npm install -g "${missing_packages[@]}"
+					$npm_cmd install -g "${missing_packages[@]}"
 				fi
 			fi
 		fi
 
 		# Update existing packages
 		if [[ $option_configure == 'no' ]]; then
-			npm update -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
+			$npm_cmd update -g "${SETUP_GLOBAL_NPM_PACKAGES[@]}"
 		fi
 
 		__print_style --g2='Global Packages (npm)' || return

@@ -2,53 +2,101 @@
 # Nightly update job: yay -Syu + mise self-update + mise upgrade.
 # Invoked by ~/.config/systemd/user/nightly-updates.timer.
 # Safe to run manually: `nightly-updates`
-#
-# Requires passwordless sudo for yay (verified at install time).
 
 set -uo pipefail
 
-log() { echo "[$(date -Iseconds)] $*"; }
-fail() {
-  log "FAIL: $*"
-  exit 1
-}
+# shellcheck source=/dev/null
+source "$(command -v obsidian-log)"
+obs_init "Nightly Updates"
+
+log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
 
 # ── yay (Arch + AUR) ──────────────────────────────────────────────────────────
 log "==> yay -Syu --noconfirm"
 if command -v yay >/dev/null; then
-  yay -Syu --noconfirm --answerdiff=None --answerclean=None || log "WARN: yay returned non-zero"
+	obs_run_warn "yay -Syu" yay -Syu --noconfirm --answerdiff=None --answerclean=None
 else
-  log "WARN: yay not installed, skipping"
+	log "WARN: yay not installed, skipping"
+	obs_note "yay" "Not installed, skipped."
 fi
 
 # ── mise (self + tools) ───────────────────────────────────────────────────────
 if command -v mise >/dev/null; then
-  log "==> mise self-update"
-  mise self-update -y || log "WARN: mise self-update returned non-zero"
+	log "==> mise self-update"
+	obs_run_warn "mise self-update" mise self-update -y
 
-  log "==> mise upgrade (global tools)"
-  mise upgrade -y || log "WARN: mise upgrade returned non-zero"
+	log "==> mise upgrade (global tools)"
+	obs_run_warn "mise upgrade" mise upgrade -y
 else
-  log "WARN: mise not installed, skipping"
+	log "WARN: mise not installed, skipping"
+	obs_note "mise" "Not installed, skipped."
 fi
 
-# beads
-setup-util-beads
+# ── beads ─────────────────────────────────────────────────────────────────────
+obs_run_warn "setup-util-beads" setup-util-beads
 
-# ── pnpm global packages ──────────────────────────────────────────────────────
+# ── node global packages ──────────────────────────────────────────────────────
 log "==> setup-node-global-utilities update"
 if command -v setup-node-global-utilities >/dev/null; then
-  setup-node-global-utilities update || log "WARN: setup-node-global-utilities returned non-zero"
+	obs_run_warn "setup-node-global-utilities" setup-node-global-utilities update
 else
-  log "WARN: setup-node-global-utilities not found, skipping"
+	log "WARN: setup-node-global-utilities not found, skipping"
+	obs_note "setup-node-global-utilities" "Not found, skipped."
 fi
 
 # ── uv global tools ───────────────────────────────────────────────────────────
 log "==> setup-uv-global-utilities update"
 if command -v setup-uv-global-utilities >/dev/null; then
-  setup-uv-global-utilities update || log "WARN: setup-uv-global-utilities returned non-zero"
+	obs_run_warn "setup-uv-global-utilities" setup-uv-global-utilities update
 else
-  log "WARN: setup-uv-global-utilities not found, skipping"
+	log "WARN: setup-uv-global-utilities not found, skipping"
+	obs_note "setup-uv-global-utilities" "Not found, skipped."
 fi
 
+# ── python global packages ────────────────────────────────────────────────────
+log "==> python-global-packages"
+if command -v python-global-packages >/dev/null; then
+	obs_run_warn "python-global-packages" python-global-packages
+else
+	log "WARN: python-global-packages not found, skipping"
+	obs_note "python-global-packages" "Not found, skipped."
+fi
+
+# ── supply chain audit ───────────────────────────────────────────────────────
+log "==> supply chain audit"
+
+# --- snyk (npm globals) ---
+# npm globals managed by mise lack a top-level package.json.
+# Create a temporary manifest so snyk can scan the actual installed packages.
+if command -v snyk >/dev/null; then
+	obs_run_warn "snyk audit (npm globals)" \
+		bash -c 'tmpdir=$(mktemp -d) && npm ls -g --json --depth=0 2>/dev/null | python3 -c "
+import sys, json
+deps = json.load(sys.stdin).get(\"dependencies\", {})
+pkg = {\"name\": \"npm-globals-audit\", \"version\": \"0.0.0\", \"dependencies\": {k: v.get(\"version\", \"*\") for k, v in deps.items()}}
+json.dump(pkg, sys.stdout, indent=2)
+" > "$tmpdir/package.json" && cd "$tmpdir" && snyk test --severity-threshold=high 2>&1; rm -rf "$tmpdir"' || true
+else
+	obs_note "snyk" "Not installed — run setup-util-security-scanners."
+fi
+
+# --- pip-audit (Python) ---
+# Prefer uv-installed binary (runs in its own venv); fall back to mise python module.
+if command -v pip-audit >/dev/null; then
+	obs_run_warn "pip-audit (Python)" \
+		pip-audit --desc 2>&1 || true
+else
+	obs_note "pip-audit" "Not installed — run setup-util-security-scanners or uv tool install pip-audit."
+fi
+
+# --- osv-scanner (npm globals) ---
+# npm globals lack a lockfile. Scan the global node_modules directory directly.
+if command -v osv-scanner >/dev/null; then
+	obs_run_warn "osv-scanner (npm globals)" \
+		bash -c 'osv-scanner --lockfile="$(npm root -g)/../package-lock.json" 2>&1 || osv-scanner scan "$(npm root -g)" 2>&1 || true'
+else
+	obs_note "osv-scanner" "Not installed — run setup-util-security-scanners."
+fi
+
+obs_finish
 log "==> done"

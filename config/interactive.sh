@@ -29,6 +29,7 @@ load_env_file ~/.config/dorothy/config/environment.env
 # load_env_file ~/.config/dorothy/config.local/1password.env
 
 alias gsd='gsd-with-env'
+alias mempalace-with-env='varlock run -C ~/Programming/AI/techempower-org-mempalace -- ~/Programming/AI/techempower-org-mempalace/.venv/bin/mempalace'
 
 alias ..='cd ..'
 alias ...='cd ../..'

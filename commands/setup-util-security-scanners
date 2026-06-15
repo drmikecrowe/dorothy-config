@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Install supply chain security scanning tools.
+# Bootstrap: these are installed with plain npm/uv (no scanner wrapping possible yet).
+# Run once after provisioning, then scanners are available for all subsequent installs.
+
+set -euo pipefail
+
+echo "==> Installing Socket CLI (@socketsecurity/cli)..."
+# Socket wraps npm/pnpm installs and blocks known supply chain attacks at install time.
+npm install -g @socketsecurity/cli
+
+echo "==> Installing Snyk CLI..."
+# Snyk scans for CVEs in installed packages.
+npm install -g snyk
+echo "NOTE: Run 'snyk auth' to authenticate before first use."
+
+echo "==> Installing pip-audit (Python CVE scanner)..."
+uv tool install pip-audit
+
+echo "==> Installing osv-scanner (Google OSV — multi-ecosystem)..."
+# Installed via mise so it's version-managed and hash-verified.
+mise use --global osv-scanner@latest
+
+echo ""
+echo "Security scanners installed:"
+echo "  socket    — npm/pnpm supply chain interception"
+echo "  snyk      — CVE scanning (run 'snyk auth' to activate)"
+echo "  pip-audit — Python CVE scanning"
+echo "  osv-scanner — Google OSV multi-ecosystem scanning"
+echo ""
+echo "Next: add 'socket npm install' to your npm install commands (setup-node-global-utilities already updated)."

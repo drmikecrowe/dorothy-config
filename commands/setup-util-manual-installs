@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# Dorothy Command: setup-util-claude
-# Purpose: Install GSD2-pi CLI / Desktop
+# Install tools that have no mise/uv/npm package — requires manual curl or forced npm.
+# Curl installs are hash-verified via safe-curl-install; hashes stored in version control.
 
-NODE_VERSION=$(node --version)
-if ! [[ $NODE_VERSION =~ ^v22\. ]]; then
-	echo "Requires Node 22 (Found: $NODE_VERSION)"
-	exit 1
+set -uo pipefail
+
+# shellcheck source=/dev/null
+source "$(command -v safe-curl-install)"
+
+# ── npm packages ──────────────────────────────────────────────────────────────
+echo "==> Installing @opengsd/gsd-pi..."
+# Removed --force: if this fails without it, investigate rather than bypassing npm safety checks.
+if command -v socket >/dev/null 2>&1; then
+	socket npm install -g @opengsd/gsd-pi --include=optional
+else
+	echo "WARN: socket not installed, using plain npm. Run setup-util-security-scanners first."
+	npm install -g @opengsd/gsd-pi --include=optional
 fi
-SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm install -g gsd-pi@latest
 
-curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash
-curl -fsSL https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh | bash
-uv tool install "headroom-ai[all]"
-uv tool install serena-agent@latest --prerelease=allow # had -p 3.13
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/scripts/setup.sh | bash
+# ── uv tools ─────────────────────────────────────────────────────────────────
+echo "==> Installing serena-agent..."
+uv tool install serena-agent@latest --prerelease=allow
+
+# ── curl installs (hash-verified) ────────────────────────────────────────────
+# First run: shows script preview and prompts for approval, then saves hash.
+# Subsequent runs: verifies hash — blocks and alerts if changed.
+
+safe_curl_install "caveman" \
+	"https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh"
+
+safe_curl_install "agent-of-empires" \
+	"https://raw.githubusercontent.com/njbrake/agent-of-empires/main/scripts/install.sh"
+
+safe_curl_install "rtk" \
+	"https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh"

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-driver-nvidia
+# Purpose: Install NVIDIA 470xx driver stack for Pascal GPUs (GP10x, e.g. GTX 1050/GP107) on Arch.
+#
+# Why 470xx? Arch official repos only ship nvidia-open-dkms, which requires GSP firmware (Turing+).
+# Pascal lacks GSP. The nvidia-470xx-dkms AUR package is the correct closed-source driver.
+#
+# CUDA NOTE: 470xx supports CUDA <= 11.4 only. CUDA 13 requires Turing+ GPU + nvidia-open driver.
+# If you need CUDA 13, this GPU (GP107) cannot support it regardless of driver version.
+
+set -euo pipefail
+
+KERNEL_VER=$(uname -r)
+MACHINE_ID=$(cat /etc/machine-id)
+BOOT_INITRD="/boot/${MACHINE_ID}/${KERNEL_VER}/initrd"
+TMP_INITRD="/tmp/initrd-nvidia-build-$$"
+
+echo "==> Kernel: ${KERNEL_VER}"
+echo "==> Initrd target: ${BOOT_INITRD}"
+
+# --- Remove 595 series packages that conflict with 470xx ---
+# nvidia-open-dkms: open module, requires GSP (Turing+), hard-fails on Pascal
+# nvidia-utils 595: userspace must version-match kernel module — 470xx needs 470xx-utils
+# Packages removed with -Rdd (skip dep checks) because we replace them immediately below.
+REMOVE_PKGS=()
+for pkg in nvidia-open-dkms nvidia-utils lib32-nvidia-utils libxnvctrl opencl-nvidia; do
+    if pacman -Qq "$pkg" &>/dev/null; then
+        echo "==> Marking for removal: $pkg"
+        REMOVE_PKGS+=("$pkg")
+    fi
+done
+
+if [[ ${#REMOVE_PKGS[@]} -gt 0 ]]; then
+    echo "==> Removing conflicting packages: ${REMOVE_PKGS[*]}"
+    sudo pacman -Rdd --noconfirm "${REMOVE_PKGS[@]}"
+fi
+
+# --- Install 470xx stack from AUR (yay required) ---
+if ! command -v yay &>/dev/null; then
+    echo "ERROR: yay not found. Install yay (AUR helper) first." >&2
+    exit 1
+fi
+
+AUR_PKGS=()
+for pkg in nvidia-470xx-dkms nvidia-470xx-utils lib32-nvidia-470xx-utils libxnvctrl-470xx; do
+    if ! pacman -Qq "$pkg" &>/dev/null; then
+        AUR_PKGS+=("$pkg")
+    fi
+done
+
+if [[ ${#AUR_PKGS[@]} -gt 0 ]]; then
+    echo "==> Installing from AUR: ${AUR_PKGS[*]}"
+    yay -S --needed --noconfirm "${AUR_PKGS[@]}"
+else
+    echo "==> nvidia-470xx packages already installed"
+fi
+
+# --- Blacklist nouveau ---
+BLACKLIST=/etc/modprobe.d/blacklist-nouveau.conf
+if [[ ! -f "$BLACKLIST" ]]; then
+    echo "==> Writing $BLACKLIST"
+    printf 'blacklist nouveau\noptions nouveau modeset=0\n' | sudo tee "$BLACKLIST" > /dev/null
+else
+    echo "==> Nouveau already blacklisted"
+fi
+
+# --- Dracut config: pull nvidia modules into initramfs ---
+DRACUT_CONF=/etc/dracut.conf.d/nvidia.conf
+if [[ ! -f "$DRACUT_CONF" ]]; then
+    echo "==> Writing $DRACUT_CONF"
+    sudo tee "$DRACUT_CONF" > /dev/null <<'EOF'
+add_drivers+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm "
+install_items+=" /etc/modprobe.d/blacklist-nouveau.conf "
+EOF
+else
+    echo "==> Dracut nvidia config already present"
+fi
+
+# --- Build initramfs to /tmp (avoid /boot space exhaustion), then copy ---
+echo "==> Building initramfs for ${KERNEL_VER} in /tmp..."
+sudo dracut \
+    --force \
+    --hostonly \
+    --tmpdir /tmp \
+    "${TMP_INITRD}" \
+    "${KERNEL_VER}"
+
+echo "==> Build size: $(du -sh "${TMP_INITRD}" | cut -f1)"
+echo "==> Copying to ${BOOT_INITRD}..."
+sudo cp "${TMP_INITRD}" "${BOOT_INITRD}"
+sudo rm -f "${TMP_INITRD}"
+
+# --- Verify ---
+echo ""
+echo "==> Verification:"
+echo "    nvidia-470xx-dkms : $(pacman -Qq nvidia-470xx-dkms 2>/dev/null || echo NOT INSTALLED)"
+echo "    nvidia-470xx-utils: $(pacman -Qq nvidia-470xx-utils 2>/dev/null || echo NOT INSTALLED)"
+INITRD_SIZE=$(du -sh "${BOOT_INITRD}" 2>/dev/null | cut -f1 || echo "NOT FOUND")
+echo "    initrd            : ${INITRD_SIZE} at ${BOOT_INITRD}"
+echo "    nouveau loaded    : $(lsmod 2>/dev/null | awk '/^nouveau/{print $1}' || echo none) (should be none after reboot)"
+echo ""
+echo "==> Reboot to activate driver."

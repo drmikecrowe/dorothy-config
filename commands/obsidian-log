@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Sourced library for writing structured nightly update logs to Obsidian.
+#
+# Usage in calling script:
+#   source "$(command -v obsidian-log)"
+#   obs_init "Script Name"
+#   obs_run "Section Label" some-command --args    # captures output, logs section
+#   obs_alert "Something went wrong"               # appends to Alerts.md
+#   obs_finish                                     # writes summary footer
+
+_OBS_VAULT="$HOME/Notes/Notes/NightlyUpdates"
+_OBS_LOG_FILE=""
+_OBS_ALERT_FILE="$_OBS_VAULT/Alerts.md"
+_OBS_SCRIPT=""
+_OBS_ALERT_COUNT=0
+
+obs_init() {
+	local script_name="$1"
+	_OBS_SCRIPT="$script_name"
+	_OBS_ALERT_COUNT=0
+
+	local year month day
+	year="$(date +%Y)"
+	month="$(date +%m)"
+	day="$(date +%Y-%m-%d)"
+
+	_OBS_LOG_FILE="$_OBS_VAULT/$year/$month/$day.md"
+	mkdir -p "$(dirname "$_OBS_LOG_FILE")"
+	touch "$_OBS_ALERT_FILE"
+
+	if [[ ! -s "$_OBS_LOG_FILE" ]]; then
+		printf '# Nightly Updates — %s\n\n' "$day" >>"$_OBS_LOG_FILE"
+	fi
+
+	printf '## %s — %s\n\n' "$script_name" "$(date +%H:%M:%S)" >>"$_OBS_LOG_FILE"
+}
+
+# Run a command, tee output to stdout, log condensed section.
+# Non-zero exit: logged as error + alert. Use obs_run_warn for advisory steps.
+obs_run() {
+	local section="$1"; shift
+	local output exit_code=0
+
+	output=$("$@" 2>&1) || exit_code=$?
+	echo "$output"
+
+	local icon="✅"
+	if [[ $exit_code -ne 0 ]]; then
+		icon="❌"
+		obs_alert "$section failed (exit $exit_code)"
+	fi
+
+	# Log last 30 lines to keep the file readable
+	local condensed
+	condensed="$(echo "$output" | tail -30)"
+
+	printf '### %s %s\n```\n%s\n```\n\n' "$icon" "$section" "$condensed" >>"$_OBS_LOG_FILE"
+	return $exit_code
+}
+
+# Like obs_run but non-zero exit becomes a warning, not an error.
+obs_run_warn() {
+	local section="$1"; shift
+	local output exit_code=0
+
+	output=$("$@" 2>&1) || exit_code=$?
+	echo "$output"
+
+	local icon="✅"
+	if [[ $exit_code -ne 0 ]]; then
+		icon="⚠️"
+		printf '[%s] WARN: %s returned non-zero (%d)\n' "$(date -Iseconds)" "$section" "$exit_code"
+	fi
+
+	local condensed
+	condensed="$(echo "$output" | tail -30)"
+	printf '### %s %s\n```\n%s\n```\n\n' "$icon" "$section" "$condensed" >>"$_OBS_LOG_FILE"
+	return 0
+}
+
+# Append a plain text note/section without running a command.
+obs_note() {
+	local title="$1"
+	local body="${2:-}"
+	printf '### ℹ️ %s\n%s\n\n' "$title" "$body" >>"$_OBS_LOG_FILE"
+}
+
+obs_alert() {
+	local message="$1"
+	_OBS_ALERT_COUNT=$((_OBS_ALERT_COUNT + 1))
+
+	printf '## %s — %s\n⚠️ %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$_OBS_SCRIPT" "$message" >>"$_OBS_ALERT_FILE"
+	printf '[%s] ALERT: %s\n' "$(date -Iseconds)" "$message" >&2
+}
+
+obs_finish() {
+	local status="${1:-ok}"
+	local icon="✅"
+	[[ "$status" != "ok" ]] && icon="❌"
+
+	{
+		printf -- '---\n'
+		printf '%s %s finished at %s\n' "$icon" "$_OBS_SCRIPT" "$(date +%H:%M:%S)"
+		if [[ $_OBS_ALERT_COUNT -gt 0 ]]; then
+			printf '⚠️ **%d alert(s)** — see [[Alerts]]\n' "$_OBS_ALERT_COUNT"
+		fi
+		printf '\n'
+	} >>"$_OBS_LOG_FILE"
+}
