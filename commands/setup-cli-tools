@@ -9,14 +9,14 @@ function setup_cli_tools() (
 	function help {
 		cat <<-EOF >&2
 			ABOUT:
-			Install cross-platform CLI tools via pacman/brew/cargo.
+			Install cross-platform CLI tools not already covered by SETUP_UTILS.
 
 			USAGE:
-			setup-cli-tools [...options] [install|update|setup]
+			setup-cli-tools [install|update|setup] [...flags]
 
-			OPTIONS:
-			--upgrade
-			    Upgrade already-installed tools.
+			ACTIONS:
+			install   Install all tools (default)
+			update    Upgrade all tools
 		EOF
 		if [[ $# -ne 0 ]]; then
 			__print_error "$@"
@@ -24,14 +24,16 @@ function setup_cli_tools() (
 		return 22 # EINVAL
 	}
 
-	local item
+	local item option_args=()
 	while [[ $# -ne 0 ]]; do
 		item="$1"
 		shift
 		case "$item" in
 		'--help' | '-h') help ;;
-		'setup' | 'install' | 'update') ;;
-		'--'*) help "An unrecognised flag was provided: $item" ;;
+		'setup') ;;
+		'install') option_args+=('--install') ;;
+		'update') option_args+=('--upgrade') ;;
+		'--'*) option_args+=("$item") ;;
 		*) help "An unrecognised argument was provided: $item" ;;
 		esac
 	done
@@ -40,41 +42,38 @@ function setup_cli_tools() (
 	# Start
 
 	__print_style --h1='Setup CLI Tools' || return
+	local args=("${option_args[@]}")
+
+	# NOTE: The following are intentionally excluded — already in SETUP_UTILS (setup.bash):
+	# bat, eza, fd, ripgrep, sd, procs, bottom, starship, nu, zoxide, fzf
+	# jq, tealdeer, httpie, gum, moreutils, mediainfo, delta, difftastic
 
 	# =====================================
-	# Modern CLI replacements
+	# Modern CLI (not in SETUP_UTILS)
 
-	__print_style --h2='Modern CLI Replacements' || return
+	__print_style --h2='Modern CLI' || return
 
-	setup-util --name='bat'     --cli='bat'     "$@" PACMAN='bat'     BREW='bat'     CARGO='bat'
-	setup-util --name='eza'     --cli='eza'     "$@" PACMAN='eza'     BREW='eza'     CARGO='eza'
-	setup-util --name='fd'      --cli='fd'      "$@" PACMAN='fd'      BREW='fd'      CARGO='fd-find'
-	setup-util --name='ripgrep' --cli='rg'      "$@" PACMAN='ripgrep' BREW='ripgrep' CARGO='ripgrep'
-	setup-util --name='sd'      --cli='sd'      "$@" PACMAN='sd'      BREW='sd'      CARGO='sd'
-	setup-util --name='dua'     --cli='dua'     "$@" PACMAN='dua-cli' BREW='dua-cli' CARGO='dua-cli'
-	setup-util --name='gping'   --cli='gping'   "$@" PACMAN='gping'   BREW='gping'   CARGO='gping'
+	setup-util --name='dua'   --cli='dua'   "${args[@]}" PACMAN='dua-cli' BREW='dua-cli' CARGO='dua-cli'
+	setup-util --name='gping' --cli='gping' "${args[@]}" PACMAN='gping'   BREW='gping'   CARGO='gping'
 
-	__print_style --g2='Modern CLI Replacements' || return
+	__print_style --g2='Modern CLI' || return
 
 	# =====================================
 	# File navigation
 
 	__print_style --h2='File Navigation' || return
 
-	setup-util --name='yazi' --cli='yazi' "$@" PACMAN='yazi' BREW='yazi' CARGO='yazi'
+	setup-util --name='yazi' --cli='yazi' "${args[@]}" PACMAN='yazi' BREW='yazi' CARGO='yazi'
 
 	__print_style --g2='File Navigation' || return
 
 	# =====================================
-	# System monitors
+	# System monitors (not in SETUP_UTILS)
 
 	__print_style --h2='System Monitors' || return
 
-	setup-util --name='procs'      --cli='procs'      "$@" PACMAN='procs'      BREW='procs'      CARGO='procs'
-	setup-util --name='htop'       --cli='htop'       "$@" PACMAN='htop'       BREW='htop'
-	setup-util --name='prettyping' --cli='prettyping' "$@" PACMAN='prettyping' BREW='prettyping'
-	# bottom (btm) has its own command with GitHub release downloads
-	setup-util-bottom "$@"
+	setup-util --name='htop'       --cli='htop'       "${args[@]}" PACMAN='htop'       BREW='htop'
+	setup-util --name='prettyping' --cli='prettyping' "${args[@]}" PACMAN='prettyping' BREW='prettyping'
 
 	__print_style --g2='System Monitors' || return
 
@@ -83,11 +82,11 @@ function setup_cli_tools() (
 
 	__print_style --h2='File Tools' || return
 
-	setup-util --name='broot'  --cli='br'      "$@" PACMAN='broot'  BREW='broot'               CARGO='broot'
-	setup-util --name='mc'     --cli='mc'      "$@" PACMAN='mc'     BREW='midnight-commander'
-	setup-util --name='fdupes' --cli='fdupes'  "$@" PACMAN='fdupes' BREW='fdupes'
-	setup-util --name='rdfind' --cli='rdfind'  "$@" PACMAN='rdfind' BREW='rdfind'
-	setup-util --name='atool'  --cli='atool'   "$@" PACMAN='atool'  BREW='atool'
+	setup-util --name='broot'  --cli='br'     "${args[@]}" PACMAN='broot'  BREW='broot'               CARGO='broot'
+	setup-util --name='mc'     --cli='mc'     "${args[@]}" PACMAN='mc'     BREW='midnight-commander'
+	setup-util --name='fdupes' --cli='fdupes' "${args[@]}" PACMAN='fdupes' BREW='fdupes'
+	setup-util --name='rdfind' --cli='rdfind' "${args[@]}" PACMAN='rdfind' BREW='rdfind'
+	setup-util --name='atool'  --cli='atool'  "${args[@]}" PACMAN='atool'  BREW='atool'
 
 	__print_style --g2='File Tools' || return
 
@@ -96,12 +95,9 @@ function setup_cli_tools() (
 
 	__print_style --h2='Git Tools' || return
 
-	setup-util --name='onefetch'  --cli='onefetch' "$@" PACMAN='onefetch'  BREW='onefetch'  CARGO='onefetch'
-	setup-util --name='lazygit'   --cli='lazygit'  "$@" PACMAN='lazygit'   BREW='lazygit'
-	setup-util --name='git-spice' --cli='gs'       "$@" PACMAN='git-spice' BREW='git-spice'
-	# delta and difftastic have their own commands
-	setup-util-delta "$@"
-	setup-util-difftastic "$@"
+	setup-util --name='onefetch'  --cli='onefetch' "${args[@]}" PACMAN='onefetch'  BREW='onefetch'  CARGO='onefetch'
+	setup-util --name='lazygit'   --cli='lazygit'  "${args[@]}" PACMAN='lazygit'   BREW='lazygit'
+	setup-util --name='git-spice' --cli='gs'       "${args[@]}" PACMAN='git-spice' BREW='git-spice'
 
 	__print_style --g2='Git Tools' || return
 
@@ -110,9 +106,7 @@ function setup_cli_tools() (
 
 	__print_style --h2='Shell / Prompt' || return
 
-	# starship has its own command
-	setup-util-starship "$@"
-	setup-util --name='carapace' --cli='carapace' "$@" \
+	setup-util --name='carapace' --cli='carapace' "${args[@]}" \
 		PACMAN='carapace-bin' \
 		AUR='carapace-bin' \
 		BREW_TAP='carapace-sh/tap' \
@@ -125,25 +119,20 @@ function setup_cli_tools() (
 
 	__print_style --h2='Data Viewing' || return
 
-	setup-util --name='jless' --cli='jless' "$@" PACMAN='jless' BREW='jless' CARGO='jless'
-	setup-util --name='glow'  --cli='glow'  "$@" PACMAN='glow'  BREW='glow'
-	setup-util --name='hexyl' --cli='hexyl' "$@" PACMAN='hexyl' BREW='hexyl' CARGO='hexyl'
-	setup-util --name='yq'    --cli='yq'    "$@" PACMAN='yq'    BREW='yq'
-	setup-util --name='htmlq' --cli='htmlq' "$@" PACMAN='htmlq' BREW='htmlq' CARGO='htmlq'
+	setup-util --name='jless' --cli='jless' "${args[@]}" PACMAN='jless' BREW='jless' CARGO='jless'
+	setup-util --name='glow'  --cli='glow'  "${args[@]}" PACMAN='glow'  BREW='glow'
+	setup-util --name='hexyl' --cli='hexyl' "${args[@]}" PACMAN='hexyl' BREW='hexyl' CARGO='hexyl'
+	setup-util --name='yq'    --cli='yq'    "${args[@]}" PACMAN='yq'    BREW='yq'
+	setup-util --name='htmlq' --cli='htmlq' "${args[@]}" PACMAN='htmlq' BREW='htmlq' CARGO='htmlq'
 
 	__print_style --g2='Data Viewing' || return
 
 	# =====================================
-	# General utilities
+	# General utilities (not in SETUP_UTILS)
 
 	__print_style --h2='General Utilities' || return
 
-	setup-util --name='httpie'    --cli='http'       "$@" PACMAN='httpie'    BREW='httpie'
-	setup-util --name='mediainfo' --cli='mediainfo'  "$@" PACMAN='mediainfo' BREW='mediainfo'
-	setup-util --name='moreutils' --cli='sponge'     "$@" PACMAN='moreutils' BREW='moreutils'
-	setup-util --name='topgrade'  --cli='topgrade'   "$@" PACMAN='topgrade'  BREW='topgrade'  CARGO='topgrade'
-	# tealdeer (tldr) has its own command
-	setup-util-tealdeer "$@"
+	setup-util --name='topgrade' --cli='topgrade' "${args[@]}" PACMAN='topgrade' BREW='topgrade' CARGO='topgrade'
 
 	__print_style --g2='General Utilities' || return
 
@@ -152,12 +141,9 @@ function setup_cli_tools() (
 
 	__print_style --h2='CLI Utilities' || return
 
-	setup-util --name='gum'    --cli='gum'    "$@" PACMAN='gum'    BREW='gum'
-	setup-util --name='rclone' --cli='rclone' "$@" PACMAN='rclone' BREW='rclone'
-	setup-util --name='d2'     --cli='d2'     "$@" PACMAN='d2'     BREW='d2'
-	setup-util --name='jwt'    --cli='jwt'    "$@" PACMAN='jwt-cli' BREW='jwt-cli' CARGO='jwt-cli'
-	# chezmoi has its own command
-	setup-util-chezmoi "$@"
+	setup-util --name='rclone' --cli='rclone' "${args[@]}" PACMAN='rclone'  BREW='rclone'
+	setup-util --name='d2'     --cli='d2'     "${args[@]}" PACMAN='d2'      BREW='d2'
+	setup-util --name='jwt'    --cli='jwt'    "${args[@]}" PACMAN='jwt-cli' BREW='jwt-cli' CARGO='jwt-cli'
 
 	__print_style --g2='CLI Utilities' || return
 
@@ -166,33 +152,24 @@ function setup_cli_tools() (
 
 	__print_style --h2='Dev / Lint' || return
 
-	setup-util --name='ruff'               --cli='ruff'               "$@" PACMAN='ruff'               BREW='ruff'               CARGO='ruff'
-	setup-util --name='stylua'             --cli='stylua'             "$@" PACMAN='stylua'             BREW='stylua'             CARGO='stylua'
-	setup-util --name='ast-grep'           --cli='sg'                 "$@" PACMAN='ast-grep'           BREW='ast-grep'           CARGO='ast-grep'
-	setup-util --name='markdownlint-cli2'  --cli='markdownlint-cli2'  "$@" PACMAN='markdownlint-cli2'  BREW='markdownlint-cli2'
-	setup-util --name='taplo'             --cli='taplo'               "$@" PACMAN='taplo'              BREW='taplo'              CARGO='taplo-cli'
-	setup-util --name='ouch'              --cli='ouch'                "$@" PACMAN='ouch'               BREW='ouch'               CARGO='ouch'
+	setup-util --name='ruff'              --cli='ruff'              "${args[@]}" PACMAN='ruff'              BREW='ruff'              CARGO='ruff'
+	setup-util --name='stylua'            --cli='stylua'            "${args[@]}" PACMAN='stylua'            BREW='stylua'            CARGO='stylua'
+	setup-util --name='ast-grep'          --cli='sg'                "${args[@]}" PACMAN='ast-grep'          BREW='ast-grep'          CARGO='ast-grep'
+	setup-util --name='markdownlint-cli2' --cli='markdownlint-cli2' "${args[@]}" PACMAN='markdownlint-cli2' BREW='markdownlint-cli2'
+	setup-util --name='taplo'             --cli='taplo'             "${args[@]}" PACMAN='taplo'             BREW='taplo'             CARGO='taplo-cli'
+	setup-util --name='ouch'              --cli='ouch'              "${args[@]}" PACMAN='ouch'              BREW='ouch'              CARGO='ouch'
 
 	__print_style --g2='Dev / Lint' || return
-
-	# =====================================
-	# Misc
-
-	__print_style --h2='Misc' || return
-
-	setup-util --name='jq' --cli='jq' "$@" PACMAN='jq' BREW='jq'
-
-	__print_style --g2='Misc' || return
 
 	# =====================================
 	# Specialized
 
 	__print_style --h2='Specialized' || return
 
-	# aws-cli: pacman name differs from brew name
-	setup-util --name='aws-cli' --cli='aws' "$@" PACMAN='aws-cli-v2-bin' AUR='aws-cli-v2-bin' BREW='awscli'
-	setup-util --name='check-jsonschema' --cli='check-jsonschema' "$@" PACMAN='check-jsonschema' BREW='check-jsonschema'
-	setup-util --name='trippy'           --cli='trip'              "$@" PACMAN='trippy'           BREW='trippy'           CARGO='trippy'
+	# aws-cli: pacman AUR name differs from brew formula
+	setup-util --name='aws-cli'          --cli='aws'              "${args[@]}" PACMAN='aws-cli-v2-bin' AUR='aws-cli-v2-bin' BREW='awscli'
+	setup-util --name='check-jsonschema' --cli='check-jsonschema' "${args[@]}" PACMAN='check-jsonschema'                    BREW='check-jsonschema'
+	setup-util --name='trippy'           --cli='trip'             "${args[@]}" PACMAN='trippy'                              BREW='trippy'           CARGO='trippy'
 
 	__print_style --g2='Specialized' || return
 
@@ -201,9 +178,9 @@ function setup_cli_tools() (
 
 	__print_style --h2='Editor / Low-level' || return
 
-	setup-util --name='neovim'   --cli='nvim'     "$@" PACMAN='neovim'   BREW='neovim'
-	setup-util --name='luarocks' --cli='luarocks' "$@" PACMAN='luarocks' BREW='luarocks'
-	setup-util --name='scdoc'    --cli='scdoc'    "$@" PACMAN='scdoc'    BREW='scdoc'
+	setup-util --name='neovim'   --cli='nvim'     "${args[@]}" PACMAN='neovim'   BREW='neovim'
+	setup-util --name='luarocks' --cli='luarocks' "${args[@]}" PACMAN='luarocks' BREW='luarocks'
+	setup-util --name='scdoc'    --cli='scdoc'    "${args[@]}" PACMAN='scdoc'    BREW='scdoc'
 
 	__print_style --g2='Editor / Low-level' || return
 

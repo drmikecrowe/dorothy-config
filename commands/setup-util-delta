@@ -16,19 +16,18 @@ function setup_util_delta() (
 	local arch options=(
 		--cli='delta'
 		"$@"
-		PACMAN='git-delta'           # ARCH (extra repo)
-		AUR='git-delta-bin'          # ARCH AUR fallback
+		PACMAN='git-delta'  # ARCH (extra repo)
+		AUR='git-delta-bin' # ARCH AUR fallback
 		BREW='git-delta'
 		BSD='git-delta'
 		CARGO='git-delta'
-		CHOCO='delta'
-		EMERGE='dev-util/git-delta'  # GENTOO
+		EMERGE='dev-util/git-delta' # GENTOO
 		NIX='nixpkgs.gitAndTools.delta'
 		PORT='git-delta'
-		RPM='git-delta'              # FEDORA
+		RPM='git-delta' # FEDORA
 		SCOOP='delta'
-		XBPS='delta'                 # VOID
-		ZYPPER='git-delta'           # SUSE
+		XBPS='delta'       # VOID
+		ZYPPER='git-delta' # SUSE
 	)
 	function __get_github_asset_url {
 		local regexp
