@@ -112,6 +112,8 @@ SETUP_GLOBAL_NPM_PACKAGES=(
     csv2json
     git-stack
     context-mode
+    @socketsecurity/cli
+    snyk
 )
 
 # =============================================================================

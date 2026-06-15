@@ -98,10 +98,22 @@ function setup_node_global_packages() (
 			done
 		fi
 
+		# Source encrypted security secrets (SOCKET_SECURITY_API_KEY, SNYK_TOKEN, etc.)
+		local _sbom_secrets
+		_sbom_secrets="$(dirname "${BASH_SOURCE[0]}")/../config.local/sbom-security.sh"
+		if [[ -f "$_sbom_secrets" ]]; then
+			# shellcheck source=/dev/null
+			source "$_sbom_secrets"
+		fi
+
 		# Use socket npm wrapper when available for supply chain protection.
 		local npm_cmd='npm'
 		if command -v socket >/dev/null 2>&1; then
-			npm_cmd='socket npm'
+			if [[ -n ${SOCKET_SECURITY_API_KEY:-} ]]; then
+				npm_cmd='socket npm'
+			else
+				__print_style --dim='socket installed but SOCKET_SECURITY_API_KEY not set — using plain npm.' || :
+			fi
 		else
 			__print_style --dim='socket not installed — using plain npm. Run setup-util-security-scanners to enable supply chain scanning.' || :
 		fi

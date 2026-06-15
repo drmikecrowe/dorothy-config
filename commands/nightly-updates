@@ -11,6 +11,17 @@ obs_init "Nightly Updates"
 
 log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
 
+# ── SBOM / security secrets ───────────────────────────────────────────────────
+# Encrypted at rest via strongbox; decrypted locally. Provides SOCKET_SECURITY_API_KEY, SNYK_TOKEN, etc.
+_sbom_secrets="$(dirname "${BASH_SOURCE[0]}")/../config.local/sbom-security.sh"
+if [[ -f "$_sbom_secrets" ]]; then
+	# shellcheck source=/dev/null
+	source "$_sbom_secrets"
+else
+	log "WARN: config.local/sbom-security.sh not found — security scanners may not authenticate"
+fi
+unset _sbom_secrets
+
 # ── yay (Arch + AUR) ──────────────────────────────────────────────────────────
 log "==> yay -Syu --noconfirm"
 if command -v yay >/dev/null; then
