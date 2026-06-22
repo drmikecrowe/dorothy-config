@@ -10,13 +10,13 @@ source ~/.local/share/dorothy/state/carapace.nu
 source ~/.local/share/dorothy/state/starship.nu
 
 
+source ../custom/00-mise.nu
 source ../custom/05-shell-prompt.nu
 source ../custom/50-yazi.nu
 source ../custom/60-zoxide.nu
 source ../custom/65-sgpt.nu
 source ../custom/90-atuin.nu
 source ../custom/95-1password-helper.nu
-source ../custom/99-mise.nu
 
 
 # Config
