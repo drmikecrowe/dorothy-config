@@ -1,4 +1,10 @@
 if [[ -d "$HOME/.oh-my-zsh" ]]; then
+    _dorothy_custom_dir="$HOME/.config/dorothy"
+    if [[ -z "$(ls -A "$_dorothy_custom_dir/oh-my-zsh-custom/plugins/synu" 2>/dev/null)" ]]; then
+        git -C "$_dorothy_custom_dir" submodule update --init --recursive
+    fi
+    unset _dorothy_custom_dir
+
     export ZSH="$HOME/.oh-my-zsh"
     export DISABLE_UPDATE_PROMPT=false
     # Removed: autoenv (calls brew), aws/azure (may call brew)
