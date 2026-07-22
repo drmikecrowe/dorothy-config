@@ -3,3 +3,6 @@
 .gsd/
 commands/.bg-shell/
 commands/.gsd/
+
+# private config — machine-local, may hold literal credentials
+*.local/
