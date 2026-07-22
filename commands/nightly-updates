@@ -44,7 +44,8 @@ else
 fi
 
 # ── beads ─────────────────────────────────────────────────────────────────────
-obs_run_warn "setup-util-beads" setup-util-beads
+# managed by mise (aqua:gastownhall/beads); setup-util-beads installed a second
+# copy to ~/.local/bin/bd that the mise install always shadowed on PATH
 
 # ── CLI tools (extras not in SETUP_UTILS) ────────────────────────────────────
 log "==> setup-cli-tools update"
@@ -85,17 +86,74 @@ fi
 # ── supply chain audit ───────────────────────────────────────────────────────
 log "==> supply chain audit"
 
-# --- snyk (npm globals) ---
-# npm globals managed by mise lack a top-level package.json.
-# Create a temporary manifest so snyk can scan the actual installed packages.
+# Run a security scanner: log its output to Obsidian (like obs_run_warn) but
+# ALSO raise a real alert and record the finding when it exits non-zero, so the
+# end-of-run Pushover summary fires. (obs_run_warn alone only logs a WARN.)
+_sec_findings=()
+audit_run() {
+	local label="$1"; shift
+	local out rc=0 icon="✅"
+	out="$("$@" 2>&1)" || rc=$?
+	printf '%s\n' "$out"
+	[[ $rc -ne 0 ]] && icon="⚠️"
+	printf '### %s %s\n```\n%s\n```\n\n' "$icon" "$label" \
+		"$(printf '%s' "$out" | tail -30)" >>"$_OBS_LOG_FILE"
+	if [[ $rc -ne 0 ]]; then
+		obs_alert "$label reported issues (exit $rc)"
+		_sec_findings+=("$label")
+	fi
+}
+
+# --- snyk (npm globals — every mise-installed node version) ---
+# Globals installed by mise have no top-level package.json/lockfile, and
+# `npm root -g` only sees the active version. For each installed version,
+# synthesize a manifest from the on-disk packages and symlink the real
+# node_modules so snyk has dependencies to resolve.
+_audit_node_globals() {
+	local nm="$1" tmp
+	tmp="$(mktemp -d)" || return 1
+	# shellcheck disable=SC2064
+	trap "rm -rf '$tmp'" RETURN
+	ln -s "$nm" "$tmp/node_modules"
+	python3 - "$nm" >"$tmp/package.json" <<'PY'
+import sys, os, json
+nm = sys.argv[1]
+deps = {}
+def add(d):
+    try:
+        with open(os.path.join(d, "package.json")) as f:
+            p = json.load(f)
+        deps[p["name"]] = p.get("version", "*")
+    except Exception:
+        pass
+for entry in sorted(os.listdir(nm)):
+    path = os.path.join(nm, entry)
+    if not os.path.isdir(path):
+        continue
+    if entry.startswith("@"):            # scoped packages live one level down
+        for sub in sorted(os.listdir(path)):
+            add(os.path.join(path, sub))
+    else:
+        add(path)
+json.dump({"name": "npm-globals-audit", "version": "0.0.0", "dependencies": deps},
+          sys.stdout, indent=2)
+PY
+	( cd "$tmp" && snyk test --severity-threshold=high 2>&1 )
+}
+
 if command -v snyk >/dev/null; then
-	obs_run_warn "snyk audit (npm globals)" \
-		bash -c 'tmpdir=$(mktemp -d) && npm ls -g --json --depth=0 2>/dev/null | python3 -c "
-import sys, json
-deps = json.load(sys.stdin).get(\"dependencies\", {})
-pkg = {\"name\": \"npm-globals-audit\", \"version\": \"0.0.0\", \"dependencies\": {k: v.get(\"version\", \"*\") for k, v in deps.items()}}
-json.dump(pkg, sys.stdout, indent=2)
-" > "$tmpdir/package.json" && cd "$tmpdir" && snyk test --severity-threshold=high 2>&1; rm -rf "$tmpdir"' || true
+	declare -A _seen=()
+	for _nm in "$HOME"/.local/share/mise/installs/node/*/lib/node_modules; do
+		[[ -d "$_nm" ]] || continue
+		# mise exposes version aliases (22, latest, lts-*) as symlinks; resolve
+		# to the real install so each version is scanned exactly once.
+		_real="$(realpath "$_nm")"
+		[[ -n "${_seen[$_real]:-}" ]] && continue
+		_seen[$_real]=1
+		_ver="$(basename "$(dirname "$(dirname "$_real")")")"
+		audit_run "snyk audit (node $_ver globals)" _audit_node_globals "$_real"
+	done
+	unset _nm _real _ver _seen
 else
 	obs_note "snyk" "Not installed — run setup-util-security-scanners."
 fi
@@ -103,19 +161,30 @@ fi
 # --- pip-audit (Python) ---
 # Prefer uv-installed binary (runs in its own venv); fall back to mise python module.
 if command -v pip-audit >/dev/null; then
-	obs_run_warn "pip-audit (Python)" \
-		pip-audit --desc 2>&1 || true
+	audit_run "pip-audit (Python)" pip-audit --desc
 else
 	obs_note "pip-audit" "Not installed — run setup-util-security-scanners or uv tool install pip-audit."
 fi
 
-# --- osv-scanner (npm globals) ---
-# npm globals lack a lockfile. Scan the global node_modules directory directly.
-if command -v osv-scanner >/dev/null; then
-	obs_run_warn "osv-scanner (npm globals)" \
-		bash -c 'osv-scanner --lockfile="$(npm root -g)/../package-lock.json" 2>&1 || osv-scanner scan "$(npm root -g)" 2>&1 || true'
-else
-	obs_note "osv-scanner" "Not installed — run setup-util-security-scanners."
+# --- osv-scanner ---
+# Intentionally not run against npm globals: osv-scanner only understands
+# lockfiles, and mise's global node_modules has none (it reports "No package
+# sources found"). snyk above already covers the installed globals. Re-add an
+# osv-scanner step here only for project trees that ship a real lockfile.
+
+# ── notify ────────────────────────────────────────────────────────────────────
+# commands.local is not on the systemd unit PATH, so call the sender by path.
+if (( ${#_sec_findings[@]} > 0 )); then
+	_pushover="$(dirname "${BASH_SOURCE[0]}")/../commands.local/send-pushover-notification"
+	if [[ -x "$_pushover" ]]; then
+		"$_pushover" \
+			"Nightly audit flagged ${#_sec_findings[@]} scanner(s): ${_sec_findings[*]}. See Obsidian [[Alerts]]." \
+			"⚠️ Security findings" 1 >/dev/null 2>&1 \
+			|| log "WARN: pushover notification failed"
+	else
+		log "WARN: send-pushover-notification not found — ${#_sec_findings[@]} finding(s) not pushed"
+	fi
+	unset _pushover
 fi
 
 obs_finish
