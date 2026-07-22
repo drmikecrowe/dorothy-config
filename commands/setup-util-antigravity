@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-antigravity
+# Purpose: Install Antigravity CLI / Desktop
+
+if command -v agy &>/dev/null; then
+	echo "Antigravity is already installed"
+else
+	echo "Installing Antigravity..."
+	curl -fsSL https://antigravity.google/cli/install.sh | bash
+fi
