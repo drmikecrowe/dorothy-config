@@ -197,17 +197,14 @@ FLATPAK_APPS=(
 # =============================================================================
 UV_INSTALL=(
     ruff                         # Python linter/formatter
-    aider-chat                   # AI pair programmer
     basedpyright                 # Python type checker
     claude-conversation-extractor
     compact-json                 # JSON formatter
     copier                       # project templating
-    crawl4ai                     # web crawler/scraper
     pyinfra                      # infrastructure automation
     shell-gpt                    # ChatGPT/LLM shell assistant
     # serena-agent               # git install: uvx --from git+https://github.com/oraios/serena
     # shell-sage                 # custom install
-    "headroom-ai[all]"
 )
 
 # =============================================================================
