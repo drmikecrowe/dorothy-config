@@ -13,6 +13,7 @@ _OBS_LOG_FILE=""
 _OBS_ALERT_FILE="$_OBS_VAULT/Alerts.md"
 _OBS_SCRIPT=""
 _OBS_ALERT_COUNT=0
+_OBS_ALERT_KEEP="${OBS_ALERT_KEEP:-50}"   # entries retained in Alerts.md
 
 obs_init() {
 	local script_name="$1"
@@ -27,6 +28,11 @@ obs_init() {
 	_OBS_LOG_FILE="$_OBS_VAULT/$year/$month/$day.md"
 	mkdir -p "$(dirname "$_OBS_LOG_FILE")"
 	touch "$_OBS_ALERT_FILE"
+
+	# Child scripts detect an in-progress run by testing $_OBS_LOG_FILE. They are
+	# separate processes, so it has to cross the process boundary — without this
+	# every child thinks it is standalone and writes its own init/finish sections.
+	export _OBS_LOG_FILE _OBS_ALERT_FILE _OBS_SCRIPT _OBS_VAULT
 
 	if [[ ! -s "$_OBS_LOG_FILE" ]]; then
 		printf '# Nightly Updates — %s\n\n' "$day" >>"$_OBS_LOG_FILE"
@@ -85,11 +91,29 @@ obs_note() {
 	printf '### ℹ️ %s\n%s\n\n' "$title" "$body" >>"$_OBS_LOG_FILE"
 }
 
+# Alerts.md is a dashboard, not an archive — the per-day file under YYYY/MM/ is
+# the permanent record. Newest entry goes on top so the page opens on what just
+# happened, and older entries fall off so it stays scannable.
 obs_alert() {
 	local message="$1"
 	_OBS_ALERT_COUNT=$((_OBS_ALERT_COUNT + 1))
 
-	printf '## %s — %s\n⚠️ %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$_OBS_SCRIPT" "$message" >>"$_OBS_ALERT_FILE"
+	local tmp
+	if tmp="$(mktemp)"; then
+		printf '## %s — %s\n⚠️ %s\n\n' \
+			"$(date '+%Y-%m-%d %H:%M:%S')" "$_OBS_SCRIPT" "$message" >"$tmp"
+		if [[ -f "$_OBS_ALERT_FILE" ]]; then
+			awk -v keep="$((_OBS_ALERT_KEEP - 1))" \
+				'/^## / { n++ } n > keep { exit } { print }' \
+				"$_OBS_ALERT_FILE" >>"$tmp"
+		fi
+		mv "$tmp" "$_OBS_ALERT_FILE"
+	else
+		# never lose an alert to a failed mktemp
+		printf '## %s — %s\n⚠️ %s\n\n' \
+			"$(date '+%Y-%m-%d %H:%M:%S')" "$_OBS_SCRIPT" "$message" >>"$_OBS_ALERT_FILE"
+	fi
+
 	printf '[%s] ALERT: %s\n' "$(date -Iseconds)" "$message" >&2
 }
 

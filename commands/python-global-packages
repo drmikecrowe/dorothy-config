@@ -43,8 +43,11 @@ _run "pip install default packages" \
 	mise exec python -- python -m pip install --upgrade \
 	$(tr '\n' ' ' <"$PACKAGES_FILE")
 
-# pip-audit: prefer the uv-installed binary, fall back to mise python module
-if command -v pip-audit >/dev/null 2>&1; then
+# pip-audit: only when run by hand. nightly-updates audits the same environment
+# itself (with baseline diffing), so auditing here too would scan it twice.
+if [[ "$_standalone" != true ]]; then
+	echo "INFO: embedded in a nightly run, skipping pip-audit (handled by nightly-updates)"
+elif command -v pip-audit >/dev/null 2>&1; then
 	audit_output=$(pip-audit 2>&1) || {
 		echo "$audit_output"
 		if [[ "$_standalone" == true ]]; then

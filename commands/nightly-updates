@@ -90,6 +90,8 @@ log "==> supply chain audit"
 # ALSO raise a real alert and record the finding when it exits non-zero, so the
 # end-of-run Pushover summary fires. (obs_run_warn alone only logs a WARN.)
 _sec_findings=()
+_SEC_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/nightly-updates"
+mkdir -p "$_SEC_STATE"
 audit_run() {
 	local label="$1"; shift
 	local out rc=0 icon="✅"
@@ -104,13 +106,15 @@ audit_run() {
 	fi
 }
 
-# --- snyk (npm globals — every mise-installed node version) ---
+# --- snyk (npm globals — every node version mise actually uses) ---
 # Globals installed by mise have no top-level package.json/lockfile, and
-# `npm root -g` only sees the active version. For each installed version,
+# `npm root -g` only sees the active version. For each configured version,
 # synthesize a manifest from the on-disk packages and symlink the real
 # node_modules so snyk has dependencies to resolve.
+#
+# Writes the machine-readable report to $2 so the caller can diff finding IDs.
 _audit_node_globals() {
-	local nm="$1" tmp
+	local nm="$1" json="$2" tmp
 	tmp="$(mktemp -d)" || return 1
 	# shellcheck disable=SC2064
 	trap "rm -rf '$tmp'" RETURN
@@ -138,32 +142,159 @@ for entry in sorted(os.listdir(nm)):
 json.dump({"name": "npm-globals-audit", "version": "0.0.0", "dependencies": deps},
           sys.stdout, indent=2)
 PY
-	( cd "$tmp" && snyk test --severity-threshold=high 2>&1 )
+	( cd "$tmp" && snyk test --severity-threshold=high --json-file-output="$json" 2>&1 )
 }
 
-if command -v snyk >/dev/null; then
-	declare -A _seen=()
-	for _nm in "$HOME"/.local/share/mise/installs/node/*/lib/node_modules; do
+# Dev tooling pulls transitive vulns its upstreams often never fix, so a plain
+# non-zero exit alerts every single night and stops meaning anything. Log the
+# full report regardless, but only raise an alert when the set of finding IDs
+# changes (or when the scanner itself breaks). Nothing is suppressed —
+# a steady-state finding is still in the Obsidian log, just not in your pocket.
+#
+#   $1 label   $2 baseline key   $3 report text   $4 exit code
+#   $5 finding IDs, newline-separated and sorted (empty = clean)
+_baseline_report() {
+	local label="$1" key="$2" out="$3" rc="$4" ids="$5"
+	local baseline="$_SEC_STATE/$key.ids" new icon="✅"
+
+	if [[ -f "$baseline" ]]; then
+		new="$(comm -13 "$baseline" <(printf '%s\n' "$ids"))"
+	else
+		new="$ids"
+	fi
+	if [[ -n "$ids" ]]; then printf '%s\n' "$ids" >"$baseline"; else : >"$baseline"; fi
+
+	[[ $rc -ne 0 ]] && icon="⚠️"
+	printf '### %s %s\n```\n%s\n```\n' "$icon" "$label" \
+		"$(printf '%s' "$out" | tail -30)" >>"$_OBS_LOG_FILE"
+
+	if [[ $rc -ne 0 && -z "$ids" ]]; then
+		# non-zero with nothing parsed means the scanner broke (auth, quota,
+		# network), not that the target is clean — that must never go quiet.
+		printf '_No parsable report — scanner failure, not a clean run._\n\n' >>"$_OBS_LOG_FILE"
+		obs_alert "$label failed to run (exit $rc)"
+		_sec_findings+=("$label (scanner error)")
+	elif [[ -n "$new" ]]; then
+		printf '**New since last run:**\n```\n%s\n```\n\n' "$new" >>"$_OBS_LOG_FILE"
+		obs_alert "$label found $(printf '%s' "$new" | rg -c .) new issue(s): $(printf '%s' "$new" | head -5 | tr '\n' ' ')"
+		_sec_findings+=("$label")
+	else
+		printf '_No new findings since baseline (%s known)._\n\n' \
+			"$(printf '%s' "$ids" | rg -c . || echo 0)" >>"$_OBS_LOG_FILE"
+	fi
+}
+
+snyk_audit_globals() {
+	local ver="$1" nm="$2"
+	local label="snyk audit (node $ver globals)"
+	local json out ids rc=0
+
+	json="$(mktemp)"
+	out="$(_audit_node_globals "$nm" "$json")" || rc=$?
+	printf '%s\n' "$out"
+
+	# --severity-threshold filters the human report but not the JSON, so filter
+	# here too — otherwise a new medium alerts you to something the log never shows.
+	ids="$(jq -r '[.. | .vulnerabilities? // empty | .[]?
+		| select(.severity == "high" or .severity == "critical") | .id] | unique[]' \
+		"$json" 2>/dev/null)"
+	rm -f "$json"
+
+	# keyed on the major: `mise upgrade` bumps the patch nightly, and a
+	# full-version key would reset the baseline and re-alert every time.
+	_baseline_report "$label" "snyk-node-${ver%%.*}" "$out" "$rc" "$ids"
+}
+
+if command -v snyk >/dev/null && command -v jq >/dev/null; then
+	# Only versions mise actually resolves — a leftover install in the mise
+	# installs/ dir is a stale tree whose findings are noise.
+	while read -r _ver; do
+		[[ -n "$_ver" ]] || continue
+		_nm="$HOME/.local/share/mise/installs/node/$_ver/lib/node_modules"
 		[[ -d "$_nm" ]] || continue
-		# mise exposes version aliases (22, latest, lts-*) as symlinks; resolve
-		# to the real install so each version is scanned exactly once.
-		_real="$(realpath "$_nm")"
-		[[ -n "${_seen[$_real]:-}" ]] && continue
-		_seen[$_real]=1
-		_ver="$(basename "$(dirname "$(dirname "$_real")")")"
-		audit_run "snyk audit (node $_ver globals)" _audit_node_globals "$_real"
-	done
-	unset _nm _real _ver _seen
-else
+		snyk_audit_globals "$_ver" "$_nm"
+	done < <(mise ls --current node 2>/dev/null | awk '{print $2}' | sort -u)
+	unset _nm _ver
+elif ! command -v snyk >/dev/null; then
 	obs_note "snyk" "Not installed — run setup-util-security-scanners."
+else
+	obs_note "snyk" "jq not installed — baseline diffing unavailable, scan skipped."
 fi
 
 # --- pip-audit (Python) ---
-# Prefer uv-installed binary (runs in its own venv); fall back to mise python module.
-if command -v pip-audit >/dev/null; then
-	audit_run "pip-audit (Python)" pip-audit --desc
+# pip-audit paints a progress spinner on *stdout*, which corrupts a redirected
+# JSON report into unparsable garbage. Always disable it and write the report
+# straight to a file rather than capturing stdout.
+_pip_audit_json() {
+	local json="$1"; shift
+	pip-audit --progress-spinner off --format=json -o "$json" "$@" 2>&1
+}
+
+# Print `name version id` per finding from a report.
+# pip-audit reports no severity, so unlike snyk every ID is tracked.
+_pip_audit_ids() {
+	local json="$1"
+	jq -r '.dependencies[]? | select((.vulns // []) | length > 0)
+		| . as $d | .vulns[] | "\($d.name) \($d.version) \(.id)"' "$json" 2>/dev/null | sort -u
+}
+
+if ! command -v pip-audit >/dev/null || ! command -v jq >/dev/null; then
+	obs_note "pip-audit" "pip-audit or jq not installed — run setup-util-security-scanners."
 else
-	obs_note "pip-audit" "Not installed — run setup-util-security-scanners or uv tool install pip-audit."
+	# mise global python env
+	_json="$(mktemp)"
+	_rc=0
+	_err="$(_pip_audit_json "$_json")" || _rc=$?
+	_ids="$(_pip_audit_ids "$_json")"
+	_out="${_ids:-No known vulnerabilities found}"
+	# pip-audit reports its summary on stderr even in JSON mode, so only surface
+	# that when it actually failed — otherwise it just duplicates the report.
+	[[ $_rc -ne 0 && -z "$_ids" && -n "$_err" ]] && _out="$_out"$'\n'"$_err"
+	printf '%s\n' "$_out"
+	_baseline_report "pip-audit (Python globals)" "pip-audit-global" "$_out" "$_rc" "$_ids"
+	rm -f "$_json"
+
+	# uv tools — each lives in its own venv that nothing else audits. Rolled into
+	# one section: 18 tools as 18 sections would bury the rest of the log.
+	if command -v uv >/dev/null; then
+		_uv_ids=""
+		_uv_out=""
+		_uv_rc=0
+		_uv_scanned=0
+		# NO_COLOR: uv colourises `tool dir` even when captured, and the escape
+		# codes silently break the glob below — which looks exactly like a clean scan.
+		_uv_dir="$(NO_COLOR=1 uv tool dir 2>/dev/null)"
+		for _sp in "$_uv_dir"/*/lib/python*/site-packages; do
+			[[ -d "$_sp" ]] || continue
+			_uv_scanned=$((_uv_scanned + 1))
+			_tool="$(basename "$(dirname "$(dirname "$(dirname "$_sp")")")")"
+			_json="$(mktemp)"
+			_pip_audit_json "$_json" --path "$_sp" >/dev/null || _uv_rc=$?
+			_found="$(_pip_audit_ids "$_json")"
+			rm -f "$_json"
+			if [[ -n "$_found" ]]; then
+				# prefix with the tool so the same CVE in two tools stays distinct
+				_uv_ids+="$(printf '%s\n' "$_found" | sed "s|^|$_tool |")"$'\n'
+				_uv_out+="$_tool: $(printf '%s' "$_found" | rg -c .) finding(s)"$'\n'
+			fi
+		done
+		_uv_ids="$(printf '%s' "$_uv_ids" | sort -u | sed '/^$/d')"
+		if (( _uv_scanned == 0 )); then
+			# uv is installed but no venv was scanned: treat as a broken scan, not
+			# a clean one, so a bad path can never masquerade as zero findings.
+			printf '%s\n' "no uv tool venvs found under '$_uv_dir'" >&2
+			printf '### ⚠️ pip-audit (uv tools)\n```\nno venvs found under %s — scan did not run\n```\n\n' \
+				"$_uv_dir" >>"$_OBS_LOG_FILE"
+			obs_alert "pip-audit (uv tools) scanned 0 venvs — check uv tool dir"
+			_sec_findings+=("pip-audit (uv tools) (scanner error)")
+		else
+			_uv_out="${_uv_out:-No known vulnerabilities found ($_uv_scanned venvs scanned)}"
+			printf '%s\n' "$_uv_out"
+			_baseline_report "pip-audit (uv tools)" "pip-audit-uv" "$_uv_out" "$_uv_rc" "$_uv_ids"
+		fi
+		unset _sp _tool _found _uv_ids _uv_out _uv_rc _uv_scanned _uv_dir
+	fi
+	unset _json _rc _ids _out
 fi
 
 # --- osv-scanner ---
