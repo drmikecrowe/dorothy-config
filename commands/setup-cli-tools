@@ -97,7 +97,7 @@ function setup_cli_tools() (
 
 	setup-util --name='onefetch' --cli='onefetch' "${args[@]}" PACMAN='onefetch' BREW='onefetch' CARGO='onefetch'
 	setup-util --name='lazygit' --cli='lazygit' "${args[@]}" PACMAN='lazygit' BREW='lazygit'
-	setup-util --name='git-spice' --cli='gs' "${args[@]}" PACMAN='git-spice' BREW='git-spice'
+	setup-util --name='git-spice' --cli='gs' "${args[@]}" PACMAN='git-spice-bin' AUR='git-spice-bin' BREW='git-spice'
 
 	__print_style --g2='Git Tools' || return
 
@@ -155,7 +155,7 @@ function setup_cli_tools() (
 	setup-util --name='stylua' --cli='stylua' "${args[@]}" PACMAN='stylua' BREW='stylua' CARGO='stylua'
 	setup-util --name='ast-grep' --cli='sg' "${args[@]}" PACMAN='ast-grep' BREW='ast-grep' CARGO='ast-grep'
 	setup-util --name='markdownlint-cli2' --cli='markdownlint-cli2' "${args[@]}" PACMAN='markdownlint-cli2' BREW='markdownlint-cli2'
-	setup-util --name='taplo' --cli='taplo' "${args[@]}" PACMAN='taplo' BREW='taplo' CARGO='taplo-cli'
+	setup-util --name='taplo' --cli='taplo' "${args[@]}" PACMAN='taplo-cli' AUR='taplo-cli' BREW='taplo' CARGO='taplo-cli'
 	setup-util --name='ouch' --cli='ouch' "${args[@]}" PACMAN='ouch' BREW='ouch' CARGO='ouch'
 
 	__print_style --g2='Dev / Lint' || return
@@ -165,8 +165,9 @@ function setup_cli_tools() (
 
 	__print_style --h2='Specialized' || return
 
-	# aws-cli: pacman AUR name differs from brew formula
-	setup-util --name='aws-cli' --cli='aws' "${args[@]}" PACMAN='aws-cli-v2-bin' AUR='aws-cli-v2-bin' BREW='awscli'
+	# aws-cli: the AUR package was renamed aws-cli-v2-bin -> aws-cli-v2 upstream,
+	# and the brew formula has always been awscli.
+	setup-util --name='aws-cli' --cli='aws' "${args[@]}" PACMAN='aws-cli-v2' AUR='aws-cli-v2' BREW='awscli'
 	setup-util --name='check-jsonschema' --cli='check-jsonschema' "${args[@]}" PACMAN='check-jsonschema' BREW='check-jsonschema'
 	setup-util --name='trippy' --cli='trip' "${args[@]}" PACMAN='trippy' BREW='trippy' CARGO='trippy'
 

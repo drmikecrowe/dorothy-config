@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Dorothy Command: toggle-tv-hdmi
+# Purpose: Switch the office monitor HDMI input via a Home Assistant webhook.
+#
+# Usage: toggle-tv-hdmi hdmi1|hdmi2
+#
+# Normally invoked by udev, not by hand: /etc/udev/rules.d/99-usb-ab-switch.rules
+# fires it through systemd-run when the USB A/B switch attaches or detaches.
+# Install both with `setup-tv-hdmi-switch`.
+#
+# The webhook URL is a credential -- HA webhooks are unauthenticated, so the URL
+# alone triggers the automation. It is NOT in this file, because this repo is
+# public. It comes from /etc/default/tv-hdmi-switch (root-owned, 0600), which
+# setup-tv-hdmi-switch renders from config.local/tv-hdmi.env.
+
+set -uo pipefail
+
+INPUT="${1-}"
+ENV_FILE=/etc/default/tv-hdmi-switch
+
+if [[ -z $INPUT ]]; then
+    echo "usage: toggle-tv-hdmi hdmi1|hdmi2" >&2
+    exit 22
+fi
+
+if [[ -r $ENV_FILE ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+fi
+
+if [[ -z ${TV_HDMI_WEBHOOK-} ]]; then
+    echo "tv-hdmi: TV_HDMI_WEBHOOK unset; run setup-tv-hdmi-switch" >&2
+    exit 1
+fi
+
+CODE=$(curl -s --max-time 10 -o /dev/null -w "%{http_code}" \
+    -X POST -H "Content-Type: application/json" \
+    -d "{\"input\":\"$INPUT\"}" \
+    "$TV_HDMI_WEBHOOK")
+CURL_EXIT=$?
+
+# Goes to the transient unit's journal so we can verify it reached HA:
+#   journalctl -u 'run-*' --since '5 min ago' | grep tv-hdmi
+echo "tv-hdmi: input=$INPUT http=$CODE curl_exit=$CURL_EXIT"
+
+[[ $CURL_EXIT -eq 0 ]] || exit "$CURL_EXIT"

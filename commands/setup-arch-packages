@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-arch-packages
+# Purpose: Install the pacman/AUR package set declared in config/setup.bash.
+#
+# Replaces the pyinfra bootstrap that used to own these lists. The arrays live
+# in config/setup.bash (ARCH_SYSTEM, ARCH_CLI, ARCH_DEV, ARCH_APPS, ARCH_VIRT,
+# ARCH_GPU_NVIDIA, ARCH_OPTIONAL, ARCH_DESKTOP_*); this command is the consumer.
+
+function setup_arch_packages() (
+	source "$DOROTHY/sources/bash.bash"
+	# bash.bash does not provide load_dorothy_config; it lives in config.sh and
+	# has to be sourced explicitly. Several existing setup-* commands call it
+	# without this line and fail at that point -- see the migration notes.
+	source "$DOROTHY/sources/config.sh"
+
+	# =====================================
+	# Arguments
+
+	function help {
+		cat <<-EOF >&2
+			ABOUT:
+			Install the Arch package set declared in config/setup.bash.
+
+			USAGE:
+			setup-arch-packages [install|update] [--dry] [--optional] [--desktop=<profile>]
+
+			OPTIONS:
+			--dry                 Print what is missing, change nothing
+			--optional            Also install ARCH_OPTIONAL
+			--desktop=<profile>   hyprland | cosmic | plasma | none
+			                      Auto-detected from \$XDG_CURRENT_DESKTOP when omitted,
+			                      which is empty over SSH -- pass it explicitly there.
+		EOF
+		if [[ $# -ne 0 ]]; then
+			__print_error "$@"
+		fi
+		return 22 # EINVAL
+	}
+
+	local item dry='no' optional='no' profile=''
+	while [[ $# -ne 0 ]]; do
+		item="$1"
+		shift
+		case "$item" in
+		'--help' | '-h') help ;;
+		'--dry' | '--dry-run') dry='yes' ;;
+		'--optional' | 'optional') optional='yes' ;;
+		'--desktop='*) profile="${item#*=}" ;;
+		'install' | 'update' | 'setup') ;;
+		*) help "An unrecognised argument was provided: $item" ;;
+		esac
+	done
+
+	# =====================================
+	# Configuration
+	# setup.bash provides:
+	local ARCH_SYSTEM=() ARCH_CLI=() ARCH_DEV=() ARCH_APPS=() ARCH_VIRT=()
+	local ARCH_OPTIONAL=() ARCH_DESKTOP_HYPRLAND=() ARCH_DESKTOP_COSMIC=() ARCH_DESKTOP_PLASMA=()
+	load_dorothy_config 'setup.bash'
+
+	# =====================================
+	# Start
+
+	__print_style --h1='Setup Arch Packages' || return
+
+	if [[ -z $profile ]]; then
+		case "${XDG_CURRENT_DESKTOP-}" in
+		*[Hh]yprland*) profile='hyprland' ;;
+		*COSMIC* | *cosmic*) profile='cosmic' ;;
+		*KDE* | *plasma*) profile='plasma' ;;
+		*) profile='none' ;;
+		esac
+	fi
+
+	local packages=()
+	packages+=("${ARCH_SYSTEM[@]}" "${ARCH_CLI[@]}" "${ARCH_DEV[@]}" "${ARCH_APPS[@]}" "${ARCH_VIRT[@]}")
+
+	case "$profile" in
+	'hyprland')
+		# Omarchy owns Hyprland itself. Adding only the gaps on a machine that has
+		# no Omarchy gives you half a desktop and hides the reason why.
+		if [[ ! -d "$HOME/.local/share/omarchy" ]]; then
+			__print_error 'Desktop profile is hyprland but ~/.local/share/omarchy is missing.'
+			__print_lines 'Pass --desktop=none to skip the desktop packages.'
+			return 1
+		fi
+		packages+=("${ARCH_DESKTOP_HYPRLAND[@]}")
+		;;
+	'cosmic') packages+=("${ARCH_DESKTOP_COSMIC[@]}") ;;
+	'plasma') packages+=("${ARCH_DESKTOP_PLASMA[@]}") ;;
+	'none') __print_lines 'No desktop profile: skipping desktop packages.' ;;
+	*) help "Unknown desktop profile: $profile" ;;
+	esac
+
+	if [[ $optional == 'yes' ]]; then
+		packages+=("${ARCH_OPTIONAL[@]}")
+	fi
+
+	__print_lines "Desktop profile: $profile" "Declared packages: ${#packages[@]}"
+
+	# =====================================
+	# What is missing
+
+	local pkg missing=()
+	for pkg in "${packages[@]}"; do
+		if ! pacman -Qq "$pkg" &>/dev/null; then
+			missing+=("$pkg")
+		fi
+	done
+
+	if [[ ${#missing[@]} -eq 0 ]]; then
+		__print_style --g1='Setup Arch Packages: nothing to install' || return
+		return 0
+	fi
+
+	__print_lines "Not installed: ${#missing[@]}"
+	__print_lines "${missing[@]}"
+
+	if [[ $dry == 'yes' ]]; then
+		__print_style --g1='Setup Arch Packages: --dry, nothing changed' || return
+		return 0
+	fi
+
+	# =====================================
+	# Install
+	# yay covers both repo and AUR packages, and refuses to build as root.
+
+	if ! command-exists yay; then
+		__print_error 'yay not found. Install an AUR helper first.'
+		return 1
+	fi
+	if [[ $EUID -eq 0 ]]; then
+		__print_error 'Do not run this as root -- yay refuses to build as root.'
+		return 1
+	fi
+
+	yay -S --needed --noconfirm --diffmenu=false "${missing[@]}"
+
+	# =====================================
+	# Verify
+
+	local still=()
+	for pkg in "${missing[@]}"; do
+		pacman -Qq "$pkg" &>/dev/null || still+=("$pkg")
+	done
+	if [[ ${#still[@]} -ne 0 ]]; then
+		__print_error "Still not installed after yay: ${#still[@]}"
+		__print_lines "${still[@]}"
+		return 1
+	fi
+
+	__print_style --g1='Setup Arch Packages' || return
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_arch_packages "$@"
+fi

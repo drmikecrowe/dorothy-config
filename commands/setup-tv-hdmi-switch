@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-tv-hdmi-switch
+# Purpose: Deploy the office monitor HDMI switch: script, secret, udev rule.
+#
+# The logic lives in commands/toggle-tv-hdmi (public). This command deploys a
+# root-owned copy to /usr/local/bin and installs the udev rule that calls it.
+#
+# Why a copy rather than pointing udev at ~/.config/dorothy:
+#   1. udev runs as root at boot, and /home is a separate LV that may not be
+#      mounted yet when a USB event fires.
+#   2. Root executing a script from a user-writable directory means anyone who
+#      can write that file gets root.
+#
+# The webhook URL is a credential and is NOT in this repo. It is read from
+# config.local/tv-hdmi.env and rendered into /etc/default/tv-hdmi-switch as
+# 0600 root:root -- the previous arrangement had it inline in a world-readable
+# /usr/local/bin/toggle_tv_hdmi.sh.
+
+set -euo pipefail
+
+DOROTHY_USER="${DOROTHY:-$HOME/.local/share/dorothy}/user"
+[[ -d $DOROTHY_USER ]] || DOROTHY_USER="$HOME/.config/dorothy"
+
+SOURCE="$DOROTHY_USER/commands/toggle-tv-hdmi"
+SECRET_SOURCE="$DOROTHY_USER/config.local/tv-hdmi.env"
+TARGET=/usr/local/bin/toggle_tv_hdmi.sh
+ENV_FILE=/etc/default/tv-hdmi-switch
+UDEV_RULE=/etc/udev/rules.d/99-usb-ab-switch.rules
+
+# --- script ------------------------------------------------------------------
+echo "==> $TARGET"
+if [[ ! -f $SOURCE ]]; then
+    echo "ERROR: $SOURCE not found" >&2
+    exit 1
+fi
+if sudo test -f "$TARGET" && sudo cmp -s "$SOURCE" "$TARGET"; then
+    echo "    already current"
+else
+    sudo install -o root -g root -m 0755 "$SOURCE" "$TARGET"
+    echo "    installed from $SOURCE"
+fi
+
+# --- secret ------------------------------------------------------------------
+echo "==> $ENV_FILE"
+if [[ ! -f $SECRET_SOURCE ]]; then
+    echo "ERROR: $SECRET_SOURCE not found." >&2
+    echo "       Create it with:  TV_HDMI_WEBHOOK=\"https://...\"" >&2
+    exit 1
+fi
+if sudo test -f "$ENV_FILE" && sudo cmp -s "$SECRET_SOURCE" "$ENV_FILE"; then
+    echo "    already current"
+else
+    sudo install -o root -g root -m 0600 "$SECRET_SOURCE" "$ENV_FILE"
+    echo "    installed (0600 root:root)"
+fi
+
+# --- udev rule ---------------------------------------------------------------
+# Comments preserved verbatim from the original rule: every one of them records
+# a thing that was got wrong first.
+echo "==> $UDEV_RULE"
+read -r -d '' RULE <<'EOF' || true
+# VIA Labs USB3 A/B switch -> office monitor HDMI toggle
+#
+# Match on ENV{PRODUCT} (vendor/product/bcd, leading zeros stripped) because
+# it is the ONE identifier present in BOTH add and remove uevents. The ID_*
+# properties (ID_VENDOR_ID/ID_MODEL_ID) are set by usb_id only on add and are
+# absent from the real remove event, so matching on them never fires on detach.
+#
+# DEVTYPE=="usb_device" restricts to the hub's device node so each rule fires
+# exactly once (not once per child USB interface).
+#
+# systemd-run --no-block detaches the curl from the udev cgroup, which udev
+# otherwise kills the instant the event handler returns.
+
+# Hub attached -> HDMI 1
+ACTION=="add",    SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{PRODUCT}=="2109/817/*", RUN+="/usr/bin/systemd-run --no-block --collect /usr/local/bin/toggle_tv_hdmi.sh hdmi1"
+
+# Hub detached -> HDMI 2
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{PRODUCT}=="2109/817/*", RUN+="/usr/bin/systemd-run --no-block --collect /usr/local/bin/toggle_tv_hdmi.sh hdmi2"
+EOF
+
+if sudo test -f "$UDEV_RULE" && [[ "$(sudo cat "$UDEV_RULE")" == "$RULE" ]]; then
+    echo "    already current"
+else
+    printf '%s\n' "$RULE" | sudo tee "$UDEV_RULE" >/dev/null
+    sudo chmod 0644 "$UDEV_RULE"
+    sudo udevadm control --reload-rules
+    echo "    installed and rules reloaded"
+fi
+
+# --- verify ------------------------------------------------------------------
+echo
+echo "==> verification"
+sudo ls -l "$TARGET" "$ENV_FILE" "$UDEV_RULE"
+echo "    test by hand:  sudo /usr/local/bin/toggle_tv_hdmi.sh hdmi1"
+echo "    watch udev:    udevadm monitor --udev --subsystem-match=usb"
+echo "    read the log:  journalctl -t systemd-run --since '5 min ago'"

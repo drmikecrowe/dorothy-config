@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-system-config
+# Purpose: Root-owned system configuration: sudoers, machine-id, system services.
+#
+# Migrated from the pyinfra bootstrap (system/sudo.py, system/services.py,
+# machine/xps9560.py) on 2026-09-02.
+
+set -euo pipefail
+
+USER_NAME="${USER:-$(id -un)}"
+
+SERVICES=(
+    NetworkManager
+    cronie
+    cups
+    fstrim.timer
+    firewalld
+    tailscaled
+)
+
+# Enabled only when the hardware is present; a machine without bluetooth should
+# skip it rather than fail the run.
+HARDWARE_SERVICES=(
+    bluetooth
+)
+
+echo "==> sudo"
+if ! pacman -Qq sudo &>/dev/null; then
+    sudo pacman -S --needed --noconfirm sudo
+fi
+
+if ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx wheel; then
+    echo "==> adding $USER_NAME to wheel"
+    sudo usermod -aG wheel "$USER_NAME"
+else
+    echo "==> $USER_NAME already in wheel"
+fi
+
+# Drop-in rather than editing /etc/sudoers: survives updates, and a syntax error
+# in a drop-in is recoverable where a broken /etc/sudoers locks you out.
+SUDOERS="/etc/sudoers.d/dont-prompt-${USER_NAME}-for-sudo-password"
+# /etc/sudoers.d is 0750 root:root, so an unprivileged [[ -f ]] cannot stat
+# anything inside it and always reports missing. Test through sudo, or this
+# rewrites a security-sensitive file on every run.
+if ! sudo test -f "$SUDOERS"; then
+    echo "==> writing $SUDOERS"
+    printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$USER_NAME" | sudo tee "$SUDOERS" >/dev/null
+    sudo chmod 0440 "$SUDOERS"
+    # visudo -c on the single file: a bad drop-in breaks sudo entirely.
+    if ! sudo visudo -c -f "$SUDOERS"; then
+        echo "ERROR: $SUDOERS failed validation, removing it" >&2
+        sudo rm -f "$SUDOERS"
+        exit 1
+    fi
+else
+    echo "==> $SUDOERS already present"
+fi
+
+# --- machine-id -------------------------------------------------------------
+# The /efi layout is keyed by machine-id, so a reinstall that generates a new
+# one strands the existing boot entry. The expected value is machine-local and
+# lives in config.local/, which is gitignored -- this repo is public.
+echo "==> machine-id"
+MACHINE_ID_FILE="${DOROTHY:-$HOME/.config/dorothy}/user/config.local/machine-id"
+if [[ -f "$MACHINE_ID_FILE" ]]; then
+    EXPECTED=$(tr -d '[:space:]' <"$MACHINE_ID_FILE")
+    CURRENT=$(cat /etc/machine-id)
+    if [[ "$CURRENT" == "$EXPECTED" ]]; then
+        echo "==> machine-id already matches"
+    else
+        echo "==> restoring machine-id ($CURRENT -> $EXPECTED)"
+        printf '%s\n' "$EXPECTED" | sudo tee /etc/machine-id >/dev/null
+    fi
+else
+    echo "==> no expected machine-id recorded at $MACHINE_ID_FILE, leaving as-is"
+fi
+
+# --- services ---------------------------------------------------------------
+echo "==> services"
+for svc in "${SERVICES[@]}"; do
+    if systemctl is-enabled "$svc" &>/dev/null; then
+        echo "    $svc already enabled"
+    else
+        echo "    enabling $svc"
+        sudo systemctl enable --now "$svc"
+    fi
+done
+
+for svc in "${HARDWARE_SERVICES[@]}"; do
+    if ! systemctl list-unit-files "$svc.service" &>/dev/null; then
+        echo "    $svc not present, skipping"
+        continue
+    fi
+    if systemctl is-enabled "$svc" &>/dev/null; then
+        echo "    $svc already enabled"
+    else
+        echo "    enabling $svc"
+        sudo systemctl enable --now "$svc" || echo "    $svc failed to enable, skipping"
+    fi
+done
+
+# --- verify -----------------------------------------------------------------
+echo
+echo "==> verification"
+printf '    sudo nopasswd : %s\n' "$(sudo -n true 2>/dev/null && echo ok || echo FAILED)"
+for svc in "${SERVICES[@]}"; do
+    printf '    %-16s %s / %s\n' "$svc" "$(systemctl is-enabled "$svc" 2>&1)" "$(systemctl is-active "$svc" 2>&1)"
+done

@@ -2,6 +2,14 @@
 
 # Local override: extends Dorothy's core setup-system with user-specific steps.
 # Calls the core command as a subprocess (clean, no rename tricks).
+#
+# Absorbed the pyinfra bootstrap on 2026-09-02. Not wired in here because each
+# is a deliberate, occasional action rather than part of a routine update:
+#   setup-driver-nvidia         GPU driver + initramfs rebuild
+#   setup-pam-yubikey           edits PAM; can lock you out
+#   setup-1password-browsers    browser integration allowlist
+#   setup-util-voxtype          voice-to-text daemon + 1.6 GB model
+#   setup-util-duplicati        backup daemon
 
 function setup_system() (
 	source "$DOROTHY/sources/bash.bash"
@@ -27,6 +35,11 @@ function setup_system() (
 		setup-cli-tools "$action"
 		__print_style --g2='CLI Tools (extras)' || return
 
+		# Arch packages: system, CLI, dev, apps, virtualization, desktop profile
+		__print_style --h2='Arch Packages' || return
+		setup-arch-packages "$action"
+		__print_style --g2='Arch Packages' || return
+
 		# Node.js global packages
 		__print_style --h2='Node.js Global Packages' || return
 		setup-node-global-utilities "$action"
@@ -36,6 +49,11 @@ function setup_system() (
 		__print_style --h2='uv Global Tools' || return
 		setup-uv-global-utilities "$action"
 		__print_style --g2='uv Global Tools' || return
+
+		# Root-owned system config: sudoers, machine-id, services
+		__print_style --h2='System Config' || return
+		setup-system-config
+		__print_style --g2='System Config' || return
 
 		# mise: upgrade all managed runtimes on update
 		if [[ $action == 'update' ]] && command-exists mise; then

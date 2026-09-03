@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-voxtype
+# Purpose: Push-to-talk voice-to-text daemon (Whisper on the GPU via Vulkan).
+#
+# Migrated from the pyinfra bootstrap (system/voxtype.py) on 2026-09-02.
+
+set -euo pipefail
+
+USER_NAME="${USER:-$(id -un)}"
+MODEL_DIR="$HOME/.local/share/voxtype/models"
+MODEL_FILE="$MODEL_DIR/ggml-large-v3-turbo.bin"
+MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+CONFIG="$HOME/.config/voxtype/config.toml"
+SERVICE="$HOME/.config/systemd/user/voxtype.service"
+DROPIN_DIR="$HOME/.config/systemd/user/voxtype.service.d"
+
+echo "==> packages"
+MISSING=()
+for pkg in voxtype-bin vulkan-icd-loader ydotool wl-clipboard; do
+    pacman -Qq "$pkg" &>/dev/null || MISSING+=("$pkg")
+done
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    yay -S --needed --noconfirm "${MISSING[@]}"
+else
+    echo "    already installed"
+fi
+
+# ydotool needs /dev/uinput, which is group `input`. Takes effect at next login.
+if ! id -nG "$USER_NAME" | tr ' ' '\n' | grep -qx input; then
+    echo "==> adding $USER_NAME to input group (log out and back in to take effect)"
+    sudo usermod -aG input "$USER_NAME"
+else
+    echo "==> $USER_NAME already in input group"
+fi
+
+echo "==> model (~1.6 GB)"
+mkdir -p "$MODEL_DIR"
+if [[ -f "$MODEL_FILE" ]]; then
+    echo "    already present ($(du -h "$MODEL_FILE" | cut -f1))"
+else
+    echo "    downloading..."
+    curl -fL -o "$MODEL_FILE" "$MODEL_URL"
+fi
+
+# Written only when absent. The live config carries personal text replacements
+# that do not belong in this repo, and clobbering it would discard them.
+echo "==> config"
+if [[ -f "$CONFIG" ]]; then
+    echo "    $CONFIG exists, leaving it alone"
+else
+    mkdir -p "$(dirname "$CONFIG")"
+    cat >"$CONFIG" <<EOF
+[hotkey]
+enabled = true
+key = "RIGHTALT"
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 60
+
+[vad]
+enabled = true
+
+[whisper]
+model = "$MODEL_FILE"
+language = "en"
+
+[output]
+mode = "paste"
+fallback_to_clipboard = true
+
+[output.notification]
+on_transcription = true
+EOF
+    echo "    wrote $CONFIG"
+fi
+
+echo "==> systemd user service"
+mkdir -p "$(dirname "$SERVICE")"
+if [[ ! -f "$SERVICE" ]]; then
+    cat >"$SERVICE" <<'EOF'
+[Unit]
+Description=Voxtype push-to-talk voice-to-text daemon
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/voxtype/voxtype-vulkan daemon
+Restart=on-failure
+RestartSec=5
+Environment=XDG_RUNTIME_DIR=%t
+Environment=YDOTOOL_SOCKET=/tmp/.ydotool_socket
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+    echo "    wrote $SERVICE"
+else
+    echo "    already present"
+fi
+
+# XPS 15 9560 is Intel iGPU + NVIDIA dGPU. Without pinning the ICD, Vulkan
+# selects the Intel device and transcription runs about twice as slow.
+if lspci 2>/dev/null | grep -qi 'vga.*nvidia'; then
+    echo "==> NVIDIA GPU drop-in"
+    mkdir -p "$DROPIN_DIR"
+    if [[ ! -f "$DROPIN_DIR/gpu.conf" ]]; then
+        cat >"$DROPIN_DIR/gpu.conf" <<'EOF'
+[Service]
+Environment="VOXTYPE_VULKAN_DEVICE=nvidia"
+Environment="VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
+EOF
+        echo "    wrote $DROPIN_DIR/gpu.conf"
+    else
+        echo "    already present"
+    fi
+else
+    echo "==> no NVIDIA GPU detected, skipping the Vulkan drop-in"
+fi
+
+systemctl --user daemon-reload
+systemctl --user enable --now voxtype.service || true
+
+echo
+echo "==> verification"
+systemctl --user is-enabled voxtype.service || true
+systemctl --user is-active voxtype.service || true

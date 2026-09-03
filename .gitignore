@@ -4,5 +4,10 @@
 commands/.bg-shell/
 commands/.gsd/
 
-# private config — machine-local, may hold literal credentials
-*.local/
+# private config — machine-local, holds literal credentials.
+# NOT ignored: .gitattributes runs these through the strongbox clean filter, so
+# they are committed encrypted. Ignoring them here would silently disable that.
+# The decryption key is ~/.strongbox_keyring and is NOT in this repo -- back it
+# up separately or a rebuilt machine cannot read any of this.
+*.local/*.bak
+

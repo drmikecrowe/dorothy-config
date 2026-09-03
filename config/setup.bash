@@ -25,7 +25,7 @@ SETUP_UTILS=(
 
     # Shell enhancements
     starship # prompt
-    # carapace    # completions - AUR, managed via pyinfra
+    # carapace    # completions - AUR, managed via setup-arch-packages
     nu     # nushell
     zoxide # cd replacement
     fzf    # fuzzy finder
@@ -60,7 +60,7 @@ SETUP_UTILS=(
     uv     # Fast Python package manager
 
     # Editors (CLI)
-    # neovim      # neovim - managed via pyinfra
+    # neovim      # neovim - managed via setup-arch-packages
     vim # vim
 
     # Shell
@@ -69,7 +69,7 @@ SETUP_UTILS=(
     fish # fish shell
 
     # Terminals
-    # wezterm     # wezterm terminal - managed via pyinfra
+    # wezterm     # wezterm terminal - managed via setup-arch-packages
 
     # Apps (cross-platform)
     obs # OBS Studio
@@ -171,7 +171,7 @@ FLATPAK_APPS=(
 # =============================================================================
 # CARGO_INSTALL - Rust/Cargo packages (cross-platform)
 # =============================================================================
-# NOTE: These are all available via pacman on Arch, managed in pyinfra instead
+# NOTE: These are all available via pacman on Arch, managed in ARCH_* / setup-arch-packages instead
 # CARGO_INSTALL=(
 #     atuin           # shell history sync
 #     yazi-fm         # file manager
@@ -187,7 +187,7 @@ FLATPAK_APPS=(
 # =============================================================================
 # GO_INSTALL - Go packages (cross-platform)
 # =============================================================================
-# NOTE: lazygit, glow, rclone available via pacman, managed in pyinfra
+# NOTE: lazygit, glow, rclone available via pacman, managed in ARCH_* / setup-arch-packages
 # eget not in pacman/AUR - install manually if needed: go install github.com/zyedidia/eget@latest
 # GO_INSTALL=(
 # )
@@ -201,7 +201,6 @@ UV_INSTALL=(
     claude-conversation-extractor
     compact-json                 # JSON formatter
     copier                       # project templating
-    pyinfra                      # infrastructure automation
     shell-gpt                    # ChatGPT/LLM shell assistant
     # serena-agent               # git install: uvx --from git+https://github.com/oraios/serena
     # shell-sage                 # custom install
@@ -289,6 +288,284 @@ FLATPAK_INSTALL=(
     # com.spotify.Client
     # io.dbeaver.DBeaverCommunity
     # com.discordapp.Discord
+)
+
+
+# =============================================================================
+# ARCH_* - pacman/AUR packages, consumed by `setup-arch-packages`
+# =============================================================================
+# Migrated from the pyinfra bootstrap on 2026-09-02. Anything Dorothy already
+# installs via SETUP_UTILS or setup-cli-tools was dropped rather than moved --
+# a package belongs in exactly one place.
+#
+# Before adding here, check in order: `mise registry`, SETUP_UTILS,
+# commands/setup-cli-tools. This array is the last resort, for things that must
+# be a native system package.
+
+# Hardware, filesystems, networking and pacman tooling.
+ARCH_SYSTEM=(
+    acpi
+    cronie
+    cpupower
+    dmidecode
+    fwupd
+    hdparm
+    hwinfo
+    libva-utils
+    ntp
+    numlockx
+    powertop
+    smartmontools
+    sof-firmware
+    solaar
+    upower
+    btrfs-progs
+    cryptsetup
+    dosfstools
+    exfatprogs
+    lvm2
+    mdadm
+    nfs-utils
+    ntfs-3g
+    xfsprogs
+    bind
+    dnsmasq
+    ethtool
+    inetutils
+    net-tools
+    networkmanager
+    networkmanager-openconnect
+    networkmanager-openvpn
+    nss-mdns
+    openssh
+    tailscale
+    wireless-regdb
+    firewalld
+    gnome-keyring
+    yubikey-manager
+    yubikey-personalization-gui
+    downgrade
+    pacman-contrib
+    pkgfile
+    rebuild-detector
+    reflector
+    libxcrypt-compat
+    lib32-libcanberra
+    lib32-mesa-utils
+)
+
+# Command-line tools that must be system packages.
+# wireshark needs the wireshark group and a setuid helper, so it cannot be a mise tool.
+ARCH_CLI=(
+    bash-completion
+    plocate
+    unrar
+    unzip
+    man-db
+    man-pages
+    zsync
+    colorized-logs
+    sloccount
+    arp-scan
+    dsniff
+    nmap
+    tcpdump
+    termshark
+    wireshark-cli
+    wireshark-qt
+    wtype
+    nano
+)
+
+# Cloud and API tooling. Check `mise registry` before adding here.
+ARCH_DEV=(
+    python-pip
+    python-pipx
+    docparser
+    playwright
+    azure-cli
+    azure-functions-core-tools-bin
+    google-cloud-cli
+    wrangler
+    aws-sso-cli-bin
+)
+
+# GUI applications. Portable across desktop environments.
+ARCH_APPS=(
+    zen-browser-bin
+    google-chrome
+    wezterm
+    ghostty
+    ghostty-terminfo
+    ghostty-shell-integration
+    waveterm-bin
+    betterbird-bin
+    discord
+    element-desktop
+    wavebox
+    whatsapp-linux-desktop-bin
+    libreoffice-fresh
+    obsidian
+    anki
+    zathura
+    zathura-pdf-mupdf
+    wps-office
+    wps-office-fonts
+    prince-bin
+    md-viewer-bin
+    qmd
+    vlc
+    handbrake
+    handbrake-cli
+    avidemux-qt
+    peek
+    vokoscreen
+    kodi
+    gimp
+    filebot
+    bcompare
+    visual-studio-code-bin
+    yaak-beta-bin
+    zed-preview-bin
+    ulauncher
+    copyq
+    flameshot
+    dex
+    adobe-source-sans-fonts
+    terminus-font
+    ttf-firacode-nerd
+    ttf-inconsolata
+    ttf-indic-otf
+    x2goclient
+    sqlitebrowser
+    archivemount
+    claude-desktop-bin
+    duplicati-beta-bin
+    etckeeper
+    dwarfs-bin
+    gearlever
+    glogg
+    onedrive-abraunegg
+    gifsicle
+    swftools
+    trakt-cli-bin
+    voxtype-bin
+    way-displays
+    antigravity
+)
+
+# Virtual machines and containers.
+# Dorothy's SETUP_UTILS also installs docker, and Omarchy ships it. Pick one.
+ARCH_VIRT=(
+    virt-manager
+    virt-viewer
+    guestfs-tools
+    fuse-overlayfs
+    nvidia-container-toolkit
+)
+
+# GTX 1050 Mobile (Pascal, GP107M). Installed by setup-driver-nvidia.
+ARCH_GPU_NVIDIA=(
+    nvidia-580xx-dkms
+    nvidia-580xx-utils
+    lib32-nvidia-580xx-utils
+)
+
+# Not installed by default. `setup-arch-packages optional` installs these.
+ARCH_OPTIONAL=(
+    onvif-gui
+    onvif-util
+)
+
+
+# =============================================================================
+# ARCH_DESKTOP_* - one profile is installed, chosen by DESKTOP_PROFILE
+# =============================================================================
+# setup-arch-packages auto-detects from $XDG_CURRENT_DESKTOP when unset.
+
+# Omarchy owns Hyprland. These are the gaps it leaves.
+ARCH_DESKTOP_HYPRLAND=(
+    gtk4-layer-shell
+    way-displays
+    libinput-tools
+    wl-clipboard
+)
+
+# COSMIC desktop (EndeavourOS).
+ARCH_DESKTOP_COSMIC=(
+    cosmic-session
+    cosmic-comp
+    cosmic-greeter
+    cosmic-settings
+    cosmic-settings-daemon
+    cosmic-panel
+    cosmic-applets
+    cosmic-app-library
+    cosmic-launcher
+    cosmic-files
+    cosmic-terminal
+    cosmic-text-editor
+    cosmic-player
+    cosmic-screenshot
+    cosmic-notifications
+    cosmic-osd
+    cosmic-bg
+    cosmic-idle
+    cosmic-randr
+    cosmic-monitor
+    cosmic-workspaces
+    cosmic-store
+    cosmic-initial-setup
+    cosmic-icon-theme
+    cosmic-wallpapers
+    xdg-desktop-portal-cosmic
+)
+
+# KDE Plasma. Omarchy's installer aborts if plasma-desktop is explicit.
+ARCH_DESKTOP_PLASMA=(
+    plasma-desktop
+    plasma-workspace
+    plasma-nm
+    plasma-pa
+    plasma-systemmonitor
+    plasma-disks
+    plasma-keyboard
+    plasma-browser-integration
+    plasma-x11-session
+    kdeplasma-addons
+    powerdevil
+    bluedevil
+    kscreen
+    kinfocenter
+    kgamma
+    kwallet-pam
+    kwayland-integration
+    kde-cli-tools
+    kde-gtk-config
+    breeze-gtk
+    sddm-kcm
+    xdg-desktop-portal-kde
+    ark
+    dolphin
+    dolphin-plugins
+    kate
+    kcalc
+    kdeconnect
+    kdegraphics-thumbnailers
+    kdenetwork-filesharing
+    kimageformats
+    kio-admin
+    kio-extras
+    kio-fuse
+    konsole
+    gwenview
+    okular
+    haruna
+    spectacle
+    partitionmanager
+    print-manager
+    ffmpegthumbs
+    qt6-imageformats
 )
 
 # =============================================================================

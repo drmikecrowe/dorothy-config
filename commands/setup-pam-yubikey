@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-pam-yubikey
+# Purpose: Yubikey U2F for local login.
+#
+# Scope is deliberately narrow: /etc/pam.d/system-local-login only, so the key
+# is used at the console login prompt and nowhere else.
+#
+# It used to be wider. The pyinfra bootstrap this replaced inserted a pam_u2f
+# line into /etc/pam.d/system-auth with `sed /pam_unix.so/i`, which matches
+# every pam_unix.so line in the file -- etckeeper's copy of
+# system-auth.bak-20260827 has the same line four times over. Those lines were
+# removed by hand on 2026-08-27 and replaced with the single interactive rule
+# below. Do not reintroduce the system-auth or sudo variants.
+#
+#   git -C /etc log --oneline -- pam.d/system-auth
+#
+# The rule is `sufficient` with an interactive prompt: no key, or no registered
+# credential, falls through to the password. Never make it `required` without a
+# second root session already open.
+
+set -euo pipefail
+
+TARGET=/etc/pam.d/system-local-login
+U2F_LINE='auth      sufficient  pam_u2f.so interactive cue [cue_prompt=Tap your Yubikey] [prompt=Press Enter, then tap your Yubikey]'
+KEYS="$HOME/.config/Yubico/u2f_keys"
+
+echo "==> pam-u2f"
+if ! pacman -Qq pam-u2f &>/dev/null; then
+    sudo pacman -S --needed --noconfirm pam-u2f
+else
+    echo "    already installed"
+fi
+
+echo "==> registered credentials"
+if [[ -s "$KEYS" ]]; then
+    echo "    $KEYS present ($(grep -c '' "$KEYS") credential line(s))"
+else
+    echo "    WARNING: $KEYS missing or empty."
+    echo "             Register a key first:  pamu2fcfg > $KEYS"
+    echo "             Without it the rule is a no-op and login falls back to the password."
+fi
+
+echo "==> $TARGET"
+if sudo grep -q 'pam_u2f.so' "$TARGET"; then
+    echo "    already configured"
+else
+    sudo cp "$TARGET" "${TARGET}.bak-$(date +%Y%m%d%H%M%S)"
+    # Prepend: the rule has to be evaluated before `auth include system-login`,
+    # otherwise the password stack runs first and the key is never offered.
+    sudo sed -i "1i $U2F_LINE" "$TARGET"
+    echo "    added (backup written)"
+fi
+
+# system-auth and sudo are checked, not written. A pam_u2f line in either is
+# almost certainly the old bootstrap's, reintroduced by something.
+echo "==> checking the paths this command deliberately does not manage"
+for f in /etc/pam.d/system-auth /etc/pam.d/sudo; do
+    if sudo grep -q 'pam_u2f.so' "$f" 2>/dev/null; then
+        echo "    NOTE: $f contains a pam_u2f line. This command did not put it there."
+        sudo grep -n 'pam_u2f' "$f"
+    else
+        echo "    $f clean, as expected"
+    fi
+done
+
+echo
+echo "==> verification"
+sudo grep -n 'pam_u2f' "$TARGET"
+echo "    Open a second terminal and confirm login still works BEFORE logging out."

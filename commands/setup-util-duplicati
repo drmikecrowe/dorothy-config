@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Dorothy Command: setup-util-duplicati
+# Purpose: Duplicati backup daemon and its environment file.
+#
+# Migrated from the pyinfra bootstrap (system/apps_config.py) on 2026-09-02.
+
+set -euo pipefail
+
+ENV_FILE=/etc/default/duplicati
+
+echo "==> package"
+if ! pacman -Qq duplicati-beta-bin &>/dev/null; then
+    yay -S --needed --noconfirm duplicati-beta-bin
+else
+    echo "    already installed"
+fi
+
+echo "==> $ENV_FILE"
+DESIRED='AUTOUPDATER_Duplicati_SKIP_UPDATE=1
+DUPLICATI_HOME=/var/lib/duplicati
+DAEMON_OPTS="--webservice-port=8200"'
+
+if [[ -f "$ENV_FILE" ]] && [[ "$(cat "$ENV_FILE")" == "$DESIRED" ]]; then
+    echo "    already correct"
+else
+    printf '%s\n' "$DESIRED" | sudo tee "$ENV_FILE" >/dev/null
+    echo "    written"
+fi
+
+echo "==> service"
+if systemctl is-enabled duplicati &>/dev/null; then
+    echo "    already enabled"
+else
+    sudo systemctl enable --now duplicati
+fi
+
+echo
+echo "==> verification"
+systemctl is-enabled duplicati || true
+systemctl is-active duplicati || true
+echo "    web UI: http://localhost:8200"
