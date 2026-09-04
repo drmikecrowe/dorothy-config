@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# merge-remote-pr.sh - Script to merge a remote PR into the local main branch
+
+# Display usage information
+usage() {
+    echo "Usage: $(basename "$0") <PR_NUMBER>"
+    echo "Merges the specified GitHub pull request number into your local main branch."
+    exit 1
+}
+
+# Check if PR number argument is provided
+if [ $# -ne 1 ]; then
+    echo "Error: PR number is required."
+    usage
+fi
+
+# Get PR number from argument
+PR_NUMBER=$1
+
+# Validate that the PR number is a positive integer
+if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "Error: PR number must be a positive integer."
+    usage
+fi
+
+# Create a branch name for the PR
+PR_BRANCH="pr-$PR_NUMBER"
+
+# Echo operations for user visibility
+echo "Fetching PR #$PR_NUMBER..."
+
+# Fetch the PR and create a local branch
+if ! git fetch origin "refs/pull/$PR_NUMBER/head:$PR_BRANCH"; then
+    echo "Error: Failed to fetch PR #$PR_NUMBER. Please check if the PR exists."
+    exit 1
+fi
+
+echo "Successfully fetched PR #$PR_NUMBER to branch $PR_BRANCH"
+
+# Ensure we're on the main branch
+echo "Checking out main branch..."
+if ! git checkout main; then
+    echo "Error: Failed to checkout main branch. Please check if the branch exists."
+    exit 1
+fi
+
+echo "Successfully checked out main branch"
+
+# Merge the PR
+echo "Merging PR #$PR_NUMBER into main..."
+if ! git merge "$PR_BRANCH" -m "Merging #$PR_NUMBER into local" --no-edit; then
+    echo "Error: Failed to merge PR #$PR_NUMBER. Please resolve conflicts manually."
+    exit 1
+fi
+
+echo "Successfully merged PR #$PR_NUMBER into main"
+
+# Optional: Clean up by deleting the temporary branch
+echo "Cleaning up temporary branch..."
+if ! git branch -D "$PR_BRANCH"; then
+    echo "Warning: Failed to delete temporary branch $PR_BRANCH"
+fi
+
+echo "PR #$PR_NUMBER has been successfully merged into your local main branch."
+exit 0

@@ -1,0 +1,51 @@
+#!/usr/bin/env -S usage bash
+
+#USAGE arg "<port>" help="The port number to check and kill processes on" 
+
+set -e
+
+echo "🔍 Checking for processes on port $usage_port..."
+
+# Get process info and save to variable
+OUT=$(sudo netstat -lnpt | rg "$usage_port" | tee /dev/stderr)
+
+if [ -z "$OUT" ]; then
+    echo "✨ No processes found running on port $usage_port"
+    exit 0
+fi
+
+# Extract PID
+PID=$(echo "$OUT" | awk '{ print $7 }' | rg -o '[0-9]+')
+
+if [ -z "$PID" ]; then
+    echo "❌ Could not extract process ID from netstat output"
+    exit 1
+fi
+
+echo "🎯 Found process ID: $PID"
+
+# Try normal kill first
+echo "🔄 Attempting normal kill of process $PID..."
+kill $PID
+
+# Wait a moment and check if process is still running
+sleep 1
+if ps -p $PID > /dev/null 2>&1; then
+    echo "⚠️  Process still running, attempting force kill..."
+    kill -9 $PID
+    sleep 1
+    
+    if ps -p $PID > /dev/null 2>&1; then
+        echo "❌ Failed to kill process $PID even with force kill"
+        exit 1
+    fi
+fi
+
+# Final check
+CHECK=$(sudo netstat -lnpt | rg "$usage_port" || true)
+if [ -z "$CHECK" ]; then
+    echo "✅ Successfully killed process on port $usage_port"
+else
+    echo "❌ Port $usage_port is still in use"
+    exit 1
+fi

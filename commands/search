@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+
+yay -Ss "$@" | awk 'BEGIN{ORS=""} /^[^ ]/ {split($0,a,"/"); split(a[2],b,"("); print "\033[1m" a[1] "/" b[1] "\033[0m\t"} /^    / {gsub(/^    /, ""); print $0 "\n"}' | sort
