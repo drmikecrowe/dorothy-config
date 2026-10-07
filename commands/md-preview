@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Dorothy Command: md-preview
+# Purpose: render a markdown file to HTML with cmark-gfm and open it in the browser
+
+set -euo pipefail
+
+if (( $# != 1 )); then
+    echo "usage: md-preview <file.md>" >&2
+    exit 1
+fi
+
+SOURCE="$1"
+if [[ ! -f $SOURCE ]]; then
+    echo "md-preview: no such file: $SOURCE" >&2
+    exit 1
+fi
+
+TITLE="$(basename "$SOURCE")"
+# the HTML lives in the cache dir, so relative images and links need a base
+BASE_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+OUT_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/md-preview"
+mkdir -p "$OUT_DIR"
+OUT="$OUT_DIR/${TITLE%.*}.html"
+
+{
+    cat <<EOF
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$TITLE</title>
+<base href="file://$BASE_DIR/">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    max-width: 48rem;
+    margin: 3rem auto;
+    padding: 0 1.5rem;
+    font: 16px/1.6 system-ui, sans-serif;
+  }
+  h1, h2 { border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); padding-bottom: .3em; }
+  code, pre { font-family: ui-monospace, monospace; font-size: .9em; }
+  pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 1rem; overflow-x: auto; border-radius: 6px; }
+  code { background: color-mix(in srgb, currentColor 8%, transparent); padding: .15em .35em; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: .4em .7em; }
+  blockquote { margin-left: 0; padding-left: 1rem; border-left: 3px solid color-mix(in srgb, currentColor 25%, transparent); }
+  img { max-width: 100%; }
+</style>
+EOF
+    cmark-gfm --extension table --extension strikethrough --extension autolink \
+        --extension tasklist --extension footnotes --extension tagfilter \
+        --unsafe "$SOURCE"
+} >"$OUT"
+
+xdg-open "$OUT"

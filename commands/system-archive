@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Capture system state (packages, services, hardware, /etc) before the nightly
+# Duplicati run at 22:00, so the backup carries a current snapshot.
+# Invoked by ~/.config/systemd/user/system-archive.timer.
+# Safe to run manually: `system-archive`
+#
+# Runs as mcrowe, NOT root: podman is rootless, and `systemctl --user`,
+# `crontab -l` and ~/.config/autostart must see the user's own state. The
+# script escalates with sudo only where it needs to (lshw, dmidecode, fdisk,
+# lvs/vgs/pvs, root crontab, grub.cfg, and the /etc tar).
+#
+# This is how /etc reaches the backup at all: Duplicati runs as mcrowe and
+# gets permission-denied on ~96 root-only paths under /etc. The sudo'd tar
+# here captures them with ownership and modes intact.
+
+set -uo pipefail
+
+SCRIPT="$HOME/reinstall/new-archive-arch.sh"
+ARCHIVE_ROOT="$HOME/reinstall/arch"
+KEEP=7
+
+log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
+
+if ! sudo -n true 2>/dev/null; then
+	log "FAIL: passwordless sudo unavailable; capture would silently lose"
+	log "      lshw, dmidecode, fdisk, lvs/vgs/pvs, root crontab and etc.tar.gz"
+	exit 1
+fi
+
+[[ -x "$SCRIPT" ]] || { log "FAIL: $SCRIPT not executable"; exit 1; }
+
+log "==> $SCRIPT"
+"$SCRIPT"
+rc=$?
+[[ $rc -eq 0 ]] || { log "FAIL: archive script exited $rc"; exit "$rc"; }
+
+today="$ARCHIVE_ROOT/$(date +%Y%m%d)"
+
+# tar under sudo can emit a root-owned archive; Duplicati runs as mcrowe and
+# would skip it silently. Normalise before the 22:00 backup reads it.
+if [[ -d "$today" ]]; then
+	sudo chown -R "$(id -u):$(id -g)" "$today"
+	log "captured $today ($(du -sh "$today" | cut -f1))"
+fi
+
+# Each run writes a new dated directory (~110 MB). Unpruned that is ~40 GB/yr
+# of near-duplicate data in the backup set.
+mapfile -t old < <(find "$ARCHIVE_ROOT" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' |
+	sort -r | tail -n +$((KEEP + 1)))
+for d in "${old[@]:-}"; do
+	[[ -n "$d" ]] || continue
+	log "pruning $ARCHIVE_ROOT/$d"
+	rm -rf "${ARCHIVE_ROOT:?}/$d"
+done
+
+log "done; keeping newest $KEEP captures"

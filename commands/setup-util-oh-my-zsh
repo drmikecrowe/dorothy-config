@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# https://github.com/ohmyzsh/ohmyzsh
+#
+# Not a util in the setup-util sense: there is no binary to detect, it is a git
+# checkout at ~/.oh-my-zsh that custom/10-oh-my-zsh.zsh sources. The upstream
+# install.sh wants to edit ~/.zshrc and change the login shell, neither of which
+# we want -- Dorothy owns the shell config -- so clone it directly.
+#
+# The plugins live in this repo's oh-my-zsh-custom/plugins submodules, wired up
+# via ZSH_CUSTOM in custom/10-oh-my-zsh.zsh.
+
+function setup_util_oh_my_zsh() (
+	source "$DOROTHY/sources/bash.bash"
+
+	local action='install'
+	for arg in "$@"; do
+		case "$arg" in
+		install | update | clean) action="$arg" ;;
+		esac
+	done
+
+	local omz="$HOME/.oh-my-zsh"
+
+	if [[ $action == 'clean' ]]; then
+		return 0
+	fi
+
+	if [[ -d "$omz/.git" ]]; then
+		if [[ $action == 'update' ]]; then
+			__print_lines 'oh-my-zsh: updating'
+			git -C "$omz" pull --ff-only || return
+		else
+			__print_lines 'oh-my-zsh: already installed'
+		fi
+	elif [[ -d $omz ]]; then
+		__print_error "oh-my-zsh: $omz exists but is not a git checkout, refusing to touch it"
+		return 1
+	else
+		__print_lines 'oh-my-zsh: cloning'
+		git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$omz" || return
+	fi
+
+	# The plugins custom/10-oh-my-zsh.zsh names are submodules of this repo, not
+	# of oh-my-zsh. Without them the plugin list fails to load and zsh-autosuggestions
+	# -- the partial-match completion -- silently does nothing.
+	__print_lines 'oh-my-zsh: syncing custom plugin submodules'
+	git -C "$DOROTHY/user" submodule update --init --recursive || return
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_oh_my_zsh "$@"
+fi

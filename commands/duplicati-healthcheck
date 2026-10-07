@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Alert when duplicati.service is not running.
+# Invoked by ~/.config/systemd/user/duplicati-healthcheck.timer.
+# Safe to run manually: `duplicati-healthcheck`
+#
+# Exists because duplicati.service crash-looped silently from 2026-08-12 to
+# 2026-09-03 (data folder mode 755 tripped a new startup check). A failed
+# systemd unit notifies nobody, so the outage ran three weeks unnoticed.
+
+set -uo pipefail
+
+# User instance: the system unit was disabled 2026-09-03; the service must run
+# as mcrowe to read /home/mcrowe (mode 710) and the existing job index.
+UNIT="duplicati.service"
+SYSTEMCTL=(systemctl --user)
+
+log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
+
+notify() {
+	local urgency="$1" title="$2" body="$3"
+	# User timers start without a session bus address; notify-send is a no-op
+	# without it. The journal line below is the durable record either way.
+	if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+		export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+	fi
+	notify-send -u "$urgency" -a "Duplicati" "$title" "$body" 2>/dev/null ||
+		log "WARN: notify-send failed (no active desktop session?)"
+}
+
+state="$("${SYSTEMCTL[@]}" is-active "$UNIT" 2>/dev/null)"
+
+if [[ "$state" == "active" ]]; then
+	log "OK: $UNIT is active"
+	exit 0
+fi
+
+reason="$("${SYSTEMCTL[@]}" show "$UNIT" -p Result --value 2>/dev/null)"
+since="$("${SYSTEMCTL[@]}" show "$UNIT" -p ActiveEnterTimestamp --value 2>/dev/null)"
+
+log "ALERT: $UNIT is '$state' (Result=${reason:-unknown}, last active: ${since:-never})"
+notify critical \
+	"Duplicati is not running" \
+	"State: ${state}
+Result: ${reason:-unknown}
+Backups are NOT happening.
+
+Check: systemctl --user status ${UNIT}"
+
+exit 1
