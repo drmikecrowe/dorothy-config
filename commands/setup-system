@@ -3,13 +3,23 @@
 # Local override: extends Dorothy's core setup-system with user-specific steps.
 # Calls the core command as a subprocess (clean, no rename tricks).
 #
-# Absorbed the pyinfra bootstrap on 2026-09-02. Not wired in here because each
-# is a deliberate, occasional action rather than part of a routine update:
-#   setup-driver-nvidia         GPU driver + initramfs rebuild
-#   setup-pam-yubikey           edits PAM; can lock you out
+# Absorbed the pyinfra bootstrap on 2026-09-02. These run on `install` only --
+# they are fresh-machine bootstrap steps, not part of a routine update:
 #   setup-1password-browsers    browser integration allowlist
-#   setup-util-voxtype          voice-to-text daemon + 1.6 GB model
 #   setup-util-duplicati        backup daemon
+#   setup-pam-yubikey           edits PAM; can lock you out -- runs last
+# Deliberately not wired in:
+#   setup-driver-nvidia         Omarchy owns the NVIDIA stack. Its
+#                               install/hardware/nvidia.sh picks 580xx for
+#                               pre-GSP cards (this laptop's Pascal GTX 1050)
+#                               and nvidia-open for Turing+, and writes the
+#                               modprobe and mkinitcpio drop-ins. Our script
+#                               duplicated that, and on this machine it also
+#                               marked the installed 580xx packages for
+#                               removal (pacman -Qq matches their virtual
+#                               `provides`) and rebuilt the initramfs with
+#                               dracut, which is not installed here.
+#   setup-util-voxtype          omarchy provides voice-to-text; 1.6 GB model
 
 function setup_system() (
 	source "$DOROTHY/sources/bash.bash"
@@ -30,10 +40,14 @@ function setup_system() (
 
 	if [[ $action =~ ^(install|update)$ ]]; then
 
-		# CLI tools not covered by SETUP_UTILS
-		__print_style --h2='CLI Tools (extras)' || return
-		setup-cli-tools "$action"
-		__print_style --g2='CLI Tools (extras)' || return
+		# CLI tools not covered by SETUP_UTILS are pacman/AUR packages declared
+		# in config/setup.bash; setup-arch-packages below installs them.
+
+		# oh-my-zsh: the checkout custom/10-oh-my-zsh.zsh sources, plus the
+		# oh-my-zsh-custom plugin submodules it points ZSH_CUSTOM at.
+		__print_style --h2='oh-my-zsh' || return
+		setup-util-oh-my-zsh "$action"
+		__print_style --g2='oh-my-zsh' || return
 
 		# Arch packages: system, CLI, dev, apps, virtualization, desktop profile
 		__print_style --h2='Arch Packages' || return
@@ -54,6 +68,19 @@ function setup_system() (
 		__print_style --h2='System Config' || return
 		setup-system-config
 		__print_style --g2='System Config' || return
+
+		# Fresh-machine bootstrap. install only: the PAM edit is not something a
+		# routine update should redo. Ordered after
+		# setup-system-config so passwordless sudo is already in place, and with
+		# setup-pam-yubikey last -- verify sudo and a fresh login still work
+		# before logging out.
+		if [[ $action == 'install' ]]; then
+			__print_style --h2='Machine Bootstrap' || return
+			setup-1password-browsers
+			setup-util-duplicati
+			setup-pam-yubikey
+			__print_style --g2='Machine Bootstrap' || return
+		fi
 
 		# mise: upgrade all managed runtimes on update
 		if [[ $action == 'update' ]] && command-exists mise; then

@@ -21,7 +21,6 @@ function setup_util_difftastic() (
 		AUR='difftastic'             # ARCH AUR
 		BREW='difftastic'
 		CARGO='difftastic'
-		CHOCO='difftastic'           # WINDOWS
 		EMERGE='dev-util/difftastic' # GENTOO
 		NIX='difftastic'
 		RPM='rust-difftastic'        # FEDORA

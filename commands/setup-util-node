@@ -53,7 +53,6 @@ function setup_util_node() (
 			AUR='nodejs' AUR='npm' \
 			BREW='node' \
 			BSD='nodejs' \
-			CHOCO='nodejs.install' \
 			EMERGE='nodejs' \
 			EOPKG='nodejs' \
 			RPM='nodejs' \
@@ -89,7 +88,6 @@ function setup_util_node() (
 			AUR='nodejs' AUR='npm' \
 			BREW='node' \
 			BSD='nodejs' \
-			CHOCO='nodejs.install' \
 			EMERGE='nodejs' \
 			EOPKG='nodejs' \
 			RPM='nodejs' \

@@ -1,17 +1,50 @@
 #!/usr/bin/env bash
 # Dorothy Command: setup-util-chezmoi
-# Purpose: Install chezmoi dotfile manager and apply dotfiles
+# Purpose: Install the chezmoi dotfile manager
 
 # https://www.chezmoi.io
 # https://www.chezmoi.io/install/
 
-if command -v chezmoi &> /dev/null; then
-    echo "chezmoi is already installed"
-else
-    echo "Installing chezmoi..."
-    if [[ -z "${GITHUB_USERNAME:-}" ]]; then
-        echo "ERROR: GITHUB_USERNAME is not set" >&2
-        exit 1
-    fi
-    sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply "$GITHUB_USERNAME"
+function setup_util_chezmoi() (
+	source "$DOROTHY/sources/bash.bash"
+
+	# install via the native package manager, falling back to the release binary
+	setup-util --name='chezmoi' --cli='chezmoi' "$@" \
+		AUR='chezmoi' \
+		APT='chezmoi' \
+		BREW='chezmoi' \
+		PKG='chezmoi' \
+		PORT='chezmoi' \
+		SCOOP='chezmoi' \
+		WINGET='twpayne.chezmoi' \
+		GO='github.com/twpayne/chezmoi/v2/cmd/chezmoi@latest' || return
+
+	# initialisation is a one-time bootstrap, not part of every setup run, and
+	# `chezmoi init --apply` overwrites dotfiles in $HOME -- so only offer it
+	# when there is no source state yet.
+	local source_path
+	source_path="${CHEZMOI_SOURCE_DIR:-"$HOME/.local/share/chezmoi"}"
+	if [[ -d $source_path ]]; then
+		return 0
+	fi
+
+	# GITHUB_USERNAME is not exported by Dorothy; setup-git records it in
+	# `git.bash` and mirrors it into `git config --global github.user`.
+	local username="${GITHUB_USERNAME:-}"
+	if [[ -z $username ]]; then
+		username="$(git config --global github.user 2>/dev/null || :)"
+	fi
+	if [[ -z $username ]]; then
+		__print_style --dim='chezmoi installed; skipping init as no GitHub username is configured. Run `setup-git --reconfigure`, then `chezmoi init --apply <username>`.' || :
+		return 0
+	fi
+
+	if confirm --linger --negative --ppid=$$ -- "Initialise chezmoi from ${username}'s dotfiles repo and apply it over \$HOME?"; then
+		chezmoi init --apply "$username" || return
+	fi
+)
+
+# fire if invoked standalone
+if [[ $0 == "${BASH_SOURCE[0]}" ]]; then
+	setup_util_chezmoi "$@"
 fi

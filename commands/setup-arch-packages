@@ -56,6 +56,11 @@ function setup_arch_packages() (
 	# setup.bash provides:
 	local ARCH_SYSTEM=() ARCH_CLI=() ARCH_DEV=() ARCH_APPS=() ARCH_VIRT=()
 	local ARCH_OPTIONAL=() ARCH_DESKTOP_HYPRLAND=() ARCH_DESKTOP_COSMIC=() ARCH_DESKTOP_PLASMA=()
+	# AUR_INSTALL predates this command and is only read by Dorothy core's
+	# setup-linux, which our setup-system does not call. Left unconsumed it is
+	# dead config -- that is how atuin went missing. yay handles repo and AUR
+	# packages alike, so fold it in here with the rest.
+	local AUR_INSTALL=()
 	load_dorothy_config 'setup.bash'
 
 	# =====================================
@@ -74,13 +79,28 @@ function setup_arch_packages() (
 
 	local packages=()
 	packages+=("${ARCH_SYSTEM[@]}" "${ARCH_CLI[@]}" "${ARCH_DEV[@]}" "${ARCH_APPS[@]}" "${ARCH_VIRT[@]}")
+	packages+=("${AUR_INSTALL[@]}")
 
 	case "$profile" in
 	'hyprland')
 		# Omarchy owns Hyprland itself. Adding only the gaps on a machine that has
 		# no Omarchy gives you half a desktop and hides the reason why.
-		if [[ ! -d "$HOME/.local/share/omarchy" ]]; then
-			__print_error 'Desktop profile is hyprland but ~/.local/share/omarchy is missing.'
+		#
+		# Do not look only in ~/.local/share/omarchy: Omarchy is now shipped as a
+		# pacman package that installs to /usr/share/omarchy and exports
+		# OMARCHY_PATH, so that path alone reports a system-wide install as
+		# missing. Check the ways it can actually be present.
+		local omarchy_found='no'
+		if [[ -n ${OMARCHY_PATH-} && -d ${OMARCHY_PATH-} ]]; then
+			omarchy_found='yes'
+		elif __command_exists -- omarchy; then
+			omarchy_found='yes'
+		elif [[ -d /usr/share/omarchy || -d "$HOME/.local/share/omarchy" ]]; then
+			omarchy_found='yes'
+		fi
+		if [[ $omarchy_found == 'no' ]]; then
+			__print_error 'Desktop profile is hyprland but no Omarchy installation was found.'
+			__print_lines 'Looked for: $OMARCHY_PATH, an omarchy command, /usr/share/omarchy, ~/.local/share/omarchy.'
 			__print_lines 'Pass --desktop=none to skip the desktop packages.'
 			return 1
 		fi
@@ -134,7 +154,9 @@ function setup_arch_packages() (
 		return 1
 	fi
 
-	yay -S --needed --noconfirm --diffmenu=false "${missing[@]}"
+	# `|| :` so that one package yay cannot build does not abort this function
+	# before the report below runs
+	yay -S --needed --noconfirm --diffmenu=false "${missing[@]}" || :
 
 	# =====================================
 	# Verify
@@ -144,9 +166,14 @@ function setup_arch_packages() (
 		pacman -Qq "$pkg" &>/dev/null || still+=("$pkg")
 	done
 	if [[ ${#still[@]} -ne 0 ]]; then
-		__print_error "Still not installed after yay: ${#still[@]}"
-		__print_lines "${still[@]}"
-		return 1
+		# Report, but do not abort: a single unbuildable AUR package -- an
+		# upstream source that moved, a stale PKGBUILD, a TLS failure on the
+		# source host -- would otherwise take down the rest of `setup-system`,
+		# including everything sequenced after this step. This mirrors how
+		# `setup-utils` keeps going when one utility fails.
+		__print_style --stderr --error1="Could not install ${#still[@]} package(s):" || :
+		__print_lines "${still[@]}" >&2
+		__print_style --stderr --notice1='Continuing. Re-run to retry, or drop them from the ARCH_* lists if they are permanently broken.' || :
 	fi
 
 	__print_style --g1='Setup Arch Packages' || return

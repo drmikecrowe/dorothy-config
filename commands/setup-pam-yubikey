@@ -23,6 +23,24 @@ set -euo pipefail
 TARGET=/etc/pam.d/system-local-login
 U2F_LINE='auth      sufficient  pam_u2f.so interactive cue [cue_prompt=Tap your Yubikey] [prompt=Press Enter, then tap your Yubikey]'
 KEYS="$HOME/.config/Yubico/u2f_keys"
+LEGACY=/shared/mcrowe/.config/Yubico/u2f_keys
+
+REGISTER=no
+case "${1:-}" in
+    --register) REGISTER=yes ;;
+    '') ;;
+    *)
+        cat <<EOF
+usage: setup-pam-yubikey [--register]
+
+  (no args)   Install pam-u2f, seed \$KEYS from the legacy copy when missing,
+              and write the PAM rule.
+  --register  Also register the inserted Yubikey against this host's origin
+              and append it to \$KEYS.
+EOF
+        exit 1
+        ;;
+esac
 
 echo "==> pam-u2f"
 if ! pacman -Qq pam-u2f &>/dev/null; then
@@ -32,11 +50,82 @@ else
 fi
 
 echo "==> registered credentials"
+mkdir -p "$(dirname "$KEYS")"
+chmod 700 "$(dirname "$KEYS")"
+
+if [[ ! -s "$KEYS" && -s "$LEGACY" ]]; then
+    # install, not cp: the legacy file is mode 644 and world-readable.
+    install -m 600 "$LEGACY" "$KEYS"
+    echo "    seeded from $LEGACY"
+fi
+
+# The 2024 legacy file has two fused records. It was built by appending a second
+# `pamu2fcfg` run -- which emits the username -- onto a file with no trailing
+# newline, so the first credential's options field reads "+presencemcrowe"
+# instead of "+presence" and pam_u2f rejects the whole line. That is why login
+# showed the cue and then still asked for a password.
+#
+# Repair by deleting the welded username, which turns the fusion point into the
+# ordinary ":" credential separator. A mid-line "<user>:" cannot occur inside the
+# base64 key material (base64 has no colon), so the match is unambiguous.
+# Verified 2026-09-07: repair yields two es256/+presence credentials, both
+# confirmed against pam://$(hostname) with fido2-assert.
+if [[ -s "$KEYS" && "$(<"$KEYS")" =~ [^:]$USER: ]]; then
+    echo "    repairing fused credential records in $KEYS"
+    cp -a "$KEYS" "${KEYS}.bak-$(date +%Y%m%d%H%M%S)"
+    tmp=$(mktemp)
+    sed "s/\([^:]\)$USER:/\1:/g" "$KEYS" >"$tmp"
+    install -m 600 "$tmp" "$KEYS"
+    rm -f "$tmp"
+fi
+
+if [[ "$REGISTER" == yes ]]; then
+    echo "    registering for origin pam://$(hostname) -- tap the key when it blinks"
+    # -n emits only the credential fields, for appending. It must become another
+    # colon-field on the user's EXISTING line, not a new line: pam_u2f matches
+    # one line per username and stops. The legacy file already carries both of
+    # its credentials on a single line, which is the shape to preserve.
+    cred=$(pamu2fcfg -n | tr -d '\n'); cred=${cred#:}
+    tmp=$(mktemp)
+    if [[ -s "$KEYS" ]] && awk -F: -v u="$USER" '$1==u{f=1} END{exit !f}' "$KEYS"; then
+        awk -F: -v u="$USER" -v c="$cred" \
+            '$1==u && !d {print $0 ":" c; d=1; next} {print}' "$KEYS" >"$tmp"
+    else
+        printf '%s:%s\n' "$USER" "$cred" >"$tmp"
+    fi
+    install -m 600 "$tmp" "$KEYS"
+    rm -f "$tmp"
+    echo "    appended"
+fi
+
 if [[ -s "$KEYS" ]]; then
-    echo "    $KEYS present ($(grep -c '' "$KEYS") credential line(s))"
+    chmod 600 "$KEYS"
+    creds=$(awk -F: -v u="$USER" '$1==u{c+=NF-1} END{print c+0}' "$KEYS")
+    echo "    $KEYS present, $creds credential(s) for $USER"
+    if [[ "$creds" -eq 0 ]]; then
+        echo "    ERROR: no line in $KEYS begins with '$USER:'. pam_u2f will not match."
+    fi
+    # The two seeded 2024-10-20 credentials were DEAD on the current key: a
+    # pam_u2f debug run on 2026-09-07 reported "Key not found in authenticator"
+    # for both handles against /dev/hidraw6. Either they belonged to a different
+    # authenticator or this key's FIDO applet was reset, which regenerates the
+    # master secret and invalidates every previously issued handle. Both were
+    # pruned on 2026-09-07 after --register produced a working credential; the
+    # login that succeeded used device number 3, the freshly registered one.
+    #
+    # That makes the $LEGACY seed above of no proven value -- on a new machine
+    # it imports two handles that cannot authenticate and costs ~1s each in
+    # failed probes at every login. Kept for now only because nothing has
+    # confirmed the legacy file is dead on EVERY key, only on this one.
+    #
+    # Do NOT try to verify a handle with `fido2-assert -G`: a Yubikey demands a
+    # touch BEFORE it will report FIDO_ERR_NO_CREDENTIALS, so a probe that waits
+    # for a finger proves nothing about whether the credential exists. Only
+    # pam_u2f's check-only probe (this module, with `debug`) answers that.
+    echo "    origin: pam://$(hostname)"
 else
-    echo "    WARNING: $KEYS missing or empty."
-    echo "             Register a key first:  pamu2fcfg > $KEYS"
+    echo "    WARNING: $KEYS missing or empty, and $LEGACY was not available."
+    echo "             Run: setup-pam-yubikey --register"
     echo "             Without it the rule is a no-op and login falls back to the password."
 fi
 

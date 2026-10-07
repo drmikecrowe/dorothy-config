@@ -46,8 +46,14 @@ function setup_node() (
 		shift
 		case "$item" in
 		'--help' | '-h') help ;;
-		'setup' | 'update') ;;
-		'install' | 'configure') option_configure='yes' ;;
+		# `install` must not force configuration: `setup-system install` passes it
+		# on every run, so forcing it here re-asked for the npm author name,
+		# email, homepage and license each time, even when npm already had all
+		# four. The detection below escalates to 'yes' when a value is actually
+		# missing, which is the only time the prompts are useful. `configure`
+		# remains the explicit way to re-answer them.
+		'setup' | 'update' | 'install') ;;
+		'configure') option_configure='yes' ;;
 		'--no-configure'* | '--configure'*) __flag --source={item} --target={option_configure} --affirmative --coerce || return ;;
 		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
 		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
@@ -73,15 +79,11 @@ function setup_node() (
 	# Install/Upgrade Node.js via mise
 
 	__print_style --h2='Install Node.js LTS' || return
-	# On Arch, use the LTS package from extra repo
-	# nodejs-lts-jod is the current LTS (Jod = codename for 22.x)
-	if command-exists pacman; then
-		sudo pacman -S --noconfirm --needed nodejs npm
-	else
-		# Fallback: mise use -g installs the version and sets it as global default
-		# node@lts resolves to the latest LTS version
-		mise use -g node@lts
-	fi
+	# mise use -g installs the version and sets it as the global default.
+	# Never install node/npm via the system package manager: a system npm in
+	# /usr/bin makes `npm install -g` target /usr/lib/node_modules (EACCES)
+	# whenever /usr/bin sorts ahead of the mise shims on PATH.
+	mise use -g node@lts
 	__print_style --g2='Install Node.js LTS' || return
 
 	# =====================================
@@ -133,7 +135,8 @@ function setup_node() (
 
 	if [[ ${#NPM_INSTALL[@]} -ne 0 ]]; then
 		__print_style --h2='Node.js Packages' || return
-		setup-util --installer=NODE -- "${NPM_INSTALL[@]}"
+		# pinned to mise's node so PATH ordering cannot pick a system npm
+		mise exec node -- npm install -g "${NPM_INSTALL[@]}"
 		__print_style --g2='Node.js Packages' || return
 	fi
 
@@ -142,8 +145,16 @@ function setup_node() (
 
 	if [[ ${#NODE_VERSIONS[@]} -ne 0 ]]; then
 		__print_style --h2='Additional Node.js Versions' || return
+		# `mise install`, not `mise use -g`: these are *additional* versions to
+		# have available, not the global default. `mise use -g` rewrites the
+		# global default every time, so this loop silently undid the
+		# `mise use -g node@lts` above and left the last entry of NODE_VERSIONS
+		# as the global node. That matters because npm installs global packages
+		# per node version: with the default landing on a version that has none
+		# of them, every run saw the whole global package list as missing and
+		# reinstalled it.
 		for version in "${NODE_VERSIONS[@]}"; do
-			mise use -g "node@${version}"
+			mise install "node@${version}"
 		done
 		__print_style --g2='Additional Node.js Versions' || return
 	fi

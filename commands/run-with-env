@@ -17,7 +17,7 @@ if [ -f ".env.schema" ]; then
 	exec varlock run --no-redact-stdout -- "$@"
 else
 	# Inject 1Password secrets into the environment first
-	eval "$(op-inject-env)"
+	# eval "$(op-inject-env)"
 
 	# Fallback to standard execution
 	exec "$@"

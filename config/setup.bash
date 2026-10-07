@@ -10,96 +10,81 @@
 # SETUP_UTILS - Cross-platform CLI tools installed via setup-util-*
 # =============================================================================
 # These tools have Dorothy setup-util commands and work on both Linux and macOS
+#
+# Do NOT list a tool that `setup-system` already has a dedicated phase for.
+# `setup-git`, `setup-node`, `setup-python`, `setup-go` and `setup-rust` each
+# invoke their own `setup-util-*`, so listing those tools here made `setup-utils`
+# set them up a second time in the same run. `node` was the worst offender: it
+# pulled in Dorothy's nvm-based `setup-util-node` on top of our mise-based
+# `setup-node`, so npm was configured twice against two different toolchains.
+#
+# The shells (bash/zsh/fish/nu) DO belong here: `setup-shell` reads SETUP_UTILS
+# to decide which shells to offer for installation.
 
 SETUP_UTILS=(
-    # Modern CLI replacements
-    bat     # cat replacement
-    eza     # ls replacement
-    fd      # find replacement
-    ripgrep # grep replacement
-    sd      # sed replacement
-    procs   # ps replacement
-    bottom  # htop replacement (btm)
-    dust    # du replacement
-    delta   # diff replacement
-
-    # Shell enhancements
-    starship # prompt
-    # carapace    # completions - AUR, managed via setup-arch-packages
-    nu     # nushell
-    zoxide # cd replacement
-    fzf    # fuzzy finder
-
-    # Data tools
-    jq # JSON processor
-
-    # Utilities
-    tealdeer  # tldr - simplified man pages
-    httpie    # curl alternative
-    gum       # shell scripting UI
-    moreutils # extra unix utils
-    mediainfo # media info
-    curl      # http client
-    wget      # downloader
-    aria2     # download accelerator
-    rsync     # sync tool
-
-    # Git tools
-    gh         # GitHub CLI
-    glab       # GitLab CLI
-    git        # git itself
-    git-lfs    # large file storage
-    difftastic # structural diff
-
-    # Development - Languages/Runtimes
-    deno   # Deno runtime
-    node   # Node.js (via mise or native)
-    python # Python (via mise or native)
-    go     # Go
-    rust   # Rust
-    uv     # Fast Python package manager
-
-    # Editors (CLI)
-    # neovim      # neovim - managed via setup-arch-packages
-    vim # vim
-
-    # Shell
-    bash # bash updates
-    zsh  # zsh
-    fish # fish shell
-
-    # Terminals
-    # wezterm     # wezterm terminal - managed via setup-arch-packages
-
-    # Apps (cross-platform)
-    obs # OBS Studio
-
-    # Security
-    1password     # 1Password
-    1password-cli # 1Password CLI (op)
-    gpg           # GPG
-
-    # Containers
-    docker # Docker
-
-    # Package managers
-    flatpak # Flatpak (Linux)
-
-    # Misc
-    prettier   # code formatter
-    shfmt      # shell formatter
-    shellcheck # shell linter
-    tree       # directory tree
-    trash      # safe rm
-    tokei      # code statistics
-    vhs        # terminal recorder
-    asciinema  # terminal recording
-    yt-dlp     # video downloader
+	bat
+	eza
+	fd
+	ripgrep
+	sd
+	procs
+	bottom
+	dust
+	delta
+	starship
+	nu
+	zoxide
+	fzf
+	jq
+	tealdeer
+	httpie
+	gum
+	moreutils
+	mediainfo
+	curl
+	wget
+	aria2
+	rsync
+	gh
+	glab
+	git-lfs
+	difftastic
+	deno
+	uv
+	vim
+	bash
+	zsh
+	fish
+	obs
+	1password
+	1password-cli
+	gpg
+	docker
+	flatpak
+	prettier
+	shfmt
+	shellcheck
+	tree
+	trash
+	tokei
+	vhs
+	asciinema
+	yt-dlp
+	chezmoi
+	topgrade
 )
 
+# `setup-node` runs its own `npm install -g "${NPM_INSTALL[@]}"` pass. Leaving
+# NPM_INSTALL unset let its built-in default (pnpm, typescript, ts-node) apply,
+# which meant two global npm passes per run and typescript installed twice.
+# Declare it empty and keep every global package in the single list below.
+NPM_INSTALL=()
+
+# `prettier` is intentionally absent: it is installed via SETUP_UTILS above.
 SETUP_GLOBAL_NPM_PACKAGES=(
     quicktype
-    prettier
+    pnpm
+    ts-node
     markdownlint-cli2
     json2yaml
     @google/gemini-cli
@@ -110,7 +95,7 @@ SETUP_GLOBAL_NPM_PACKAGES=(
     typescript
     playwriter
     csv2json
-    git-stack
+    npm
     context-mode
     @socketsecurity/cli
     snyk
@@ -146,10 +131,10 @@ SETUP_GLOBAL_NPM_PACKAGES=(
 #
 FLATPAK_APPS=(
     #     com.jetbrains.IntelliJ-IDEA-Ultimate
-    us.zoom.Zoom
+    # us.zoom.Zoom
     #     com.spotify.Client
     #     io.dbeaver.DBeaverCommunity
-    com.getpostman.Postman
+    # com.getpostman.Postman
     #     com.discordapp.Discord
     #     org.signal.Signal
 )
@@ -193,9 +178,13 @@ FLATPAK_APPS=(
 # )
 
 # =============================================================================
-# UV_INSTALL - Python tools via uv (cross-platform)
+# UV_GLOBAL_TOOLS - Python tools via uv (cross-platform)
 # =============================================================================
-UV_INSTALL=(
+# Deliberately NOT named UV_INSTALL: Dorothy core's setup-python passes the whole
+# list to a single `setup-util --source=UV`, which builds one batched
+# `uv tool install a b c`. `uv tool install` takes exactly one <PACKAGE>, so that
+# call always fails. setup-uv-global-utilities installs these one at a time.
+UV_GLOBAL_TOOLS=(
     ruff                         # Python linter/formatter
     basedpyright                 # Python type checker
     claude-conversation-extractor
@@ -211,71 +200,63 @@ UV_INSTALL=(
 # =============================================================================
 # Only used on Arch/Manjaro, ignored on macOS
 AUR_INSTALL=(
-    # Data tools
-    jless  # JSON viewer
-    go-yq  # YAML processor
-    xq     # XML processor
-    htmlq  # HTML processor
-
-    # CLI tools
-    gping      # ping with graph
-    prettyping # prettier ping
-    bmon       # bandwidth monitor
-    dua-cli    # disk usage
-    duf        # df replacement
-    glances    # system monitor (htop alternative)
-    trippy     # traceroute TUI
-
-    # Utilities
-    rich-cli        # rich text CLI
-    neofetch        # system info
-    inxi            # system info
-    sysz            # systemctl TUI
-    jwt-cli         # JWT tool
-    taplo-cli       # TOML toolkit (binary: taplo)
-    rclone          # cloud sync
-    ngrok           # tunnel
-    topgrade        # system-wide upgrader
-    speedtest-go-bin
-
-    # Shell
-    tmux   # terminal multiplexer
-    atuin  # shell history sync
-
-    # File tools
-    mc         # midnight commander
-    fdupes     # duplicate finder
-    rdfind     # duplicate finder
-    atool      # archive tool
-    ouch       # modern archive tool
-    hexyl      # hex viewer
-    broot      # interactive file browser
-    yazi       # terminal file manager
-
-    # Dev tools
-    ast-grep               # AST-based search/rewrite
-    d2                     # diagram tool
-    markdownlint-cli2
-    lazygit                # git TUI
-    goreleaser             # Go release tool
-    rustscan               # fast port scanner
-    onefetch               # git repo overview
-    stylua                 # lua formatter
-    typescript-language-server
-
-    # Dotfiles
-    chezmoi # dotfiles manager
-
-    # IaC
-    pulumi
-
-    # Low-level
-    evtest     # input testing
-    ydotool    # automation
-    ueberzugpp # image preview
-
-    # Media/misc
-    glow # markdown viewer (terminal)
+  agent-of-empiress
+	jless
+	go-yq
+	xq
+	htmlq
+	gping
+	prettyping
+	bmon
+	dua-cli
+	duf
+	glances
+	trippy
+	rich-cli
+	neofetch
+	inxi
+	sysz
+	jwt-cli
+	taplo-cli
+	rclone
+	ngrok
+	speedtest-go-bin
+	tmux
+	atuin
+	mc
+	fdupes
+	rdfind
+	atool
+	ouch
+	hexyl
+	broot
+	yazi
+	ast-grep
+	d2
+	lazygit
+	goreleaser
+	rustscan
+	onefetch
+	stylua
+	typescript-language-server
+	pulumi
+	evtest
+	ydotool
+	ueberzugpp
+	glow
+	# absorbed from commands/setup-cli-tools, deleted 2026-09-21: every entry it
+	# declared resolved to a pacman or AUR package, and omarchy-update already
+	# upgrades both nightly. carapace-bin belongs here and not in a setup-util
+	# call: setup-util's AUR fallback runs yay under sudo, which yay refuses.
+	htop
+	git-spice-bin
+	aws-cli-v2
+	check-jsonschema
+	neovim
+	luarocks
+	scdoc
+	topgrade
+	carapace-bin
 )
 
 # =============================================================================
@@ -295,11 +276,11 @@ FLATPAK_INSTALL=(
 # ARCH_* - pacman/AUR packages, consumed by `setup-arch-packages`
 # =============================================================================
 # Migrated from the pyinfra bootstrap on 2026-09-02. Anything Dorothy already
-# installs via SETUP_UTILS or setup-cli-tools was dropped rather than moved --
-# a package belongs in exactly one place.
+# installs via SETUP_UTILS was dropped rather than moved -- a package belongs in
+# exactly one place.
 #
 # Before adding here, check in order: `mise registry`, SETUP_UTILS,
-# commands/setup-cli-tools. This array is the last resort, for things that must
+# AUR_INSTALL above. This array is the last resort, for things that must
 # be a native system package.
 
 # Hardware, filesystems, networking and pacman tooling.
@@ -350,7 +331,12 @@ ARCH_SYSTEM=(
     rebuild-detector
     reflector
     libxcrypt-compat
-    lib32-libcanberra
+    # lib32-libcanberra -- shelved 2026-09-05. The AUR package's source is
+    # git+https://git.0pointer.net/clone/libcanberra.git, and that host's
+    # certificate does not list git.0pointer.net among its SANs, so the clone
+    # fails TLS verification and the build cannot proceed. Nothing here needs
+    # it (no steam, wine or lutris installed). Restore once upstream fixes the
+    # certificate or the AUR package switches source.
     lib32-mesa-utils
 )
 
@@ -439,7 +425,11 @@ ARCH_APPS=(
     x2goclient
     sqlitebrowser
     archivemount
-    claude-desktop-bin
+    # renamed 2026-09-05: claude-desktop-bin no longer exists in the AUR
+    # (the RPC returns no result for it), so every run tried and failed to
+    # install it. claude-desktop is the current package; claude-desktop-extra
+    # is a more heavily patched variant if this one gives trouble.
+    claude-desktop
     duplicati-beta-bin
     etckeeper
     dwarfs-bin
@@ -573,3 +563,13 @@ ARCH_DESKTOP_PLASMA=(
 # =============================================================================
 # See: ~/.default-node-packages and ~/.default-python-packages
 # Or configure via mise's tool-versions
+DOROTHY_CONFIGURE_SHELLS=(
+	bash
+	zsh
+	fish
+	nu
+	xonsh
+)
+DOROTHY_LOGIN_SHELLS=(
+	zsh
+)

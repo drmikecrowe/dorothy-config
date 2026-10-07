@@ -19,7 +19,7 @@ function setup_util_tealdeer() (
 		fi
 
 		# @todo figure out why this hangs forever on wsl
-		if ! is-wsl; then
+		if ! is-system --wsl; then
 			eval-helper --quiet --wrap -- tldr --update || return
 		fi
 	}

@@ -22,15 +22,6 @@ else
 fi
 unset _sbom_secrets
 
-# ── yay (Arch + AUR) ──────────────────────────────────────────────────────────
-log "==> yay -Syu --noconfirm"
-if command -v yay >/dev/null; then
-	obs_run_warn "yay -Syu" yay -Syu --noconfirm --answerdiff=None --answerclean=None
-else
-	log "WARN: yay not installed, skipping"
-	obs_note "yay" "Not installed, skipped."
-fi
-
 # ── mise (self + tools) ───────────────────────────────────────────────────────
 if command -v mise >/dev/null; then
 	log "==> mise self-update"
@@ -48,13 +39,11 @@ fi
 # copy to ~/.local/bin/bd that the mise install always shadowed on PATH
 
 # ── CLI tools (extras not in SETUP_UTILS) ────────────────────────────────────
-log "==> setup-cli-tools update"
-if command -v setup-cli-tools >/dev/null; then
-	obs_run_warn "setup-cli-tools" setup-cli-tools update
-else
-	log "WARN: setup-cli-tools not found, skipping"
-	obs_note "setup-cli-tools" "Not found, skipped."
-fi
+# Removed 2026-09-21. Every tool setup-cli-tools declared is now a pacman/AUR
+# package in config/setup.bash, upgraded by the yay -Syu above. Dorothy core's
+# setup-util built `pacman --sync --upgrade` for its upgrade path -- two pacman
+# operations -- so this step could never upgrade anything anyway, and its cargo
+# fallback silently shadowed the pacman copies. See bevry/dorothy setup-util.
 
 # ── node global packages ──────────────────────────────────────────────────────
 log "==> setup-node-global-utilities update"
@@ -93,7 +82,8 @@ _sec_findings=()
 _SEC_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/nightly-updates"
 mkdir -p "$_SEC_STATE"
 audit_run() {
-	local label="$1"; shift
+	local label="$1"
+	shift
 	local out rc=0 icon="✅"
 	out="$("$@" 2>&1)" || rc=$?
 	printf '%s\n' "$out"
@@ -142,7 +132,7 @@ for entry in sorted(os.listdir(nm)):
 json.dump({"name": "npm-globals-audit", "version": "0.0.0", "dependencies": deps},
           sys.stdout, indent=2)
 PY
-	( cd "$tmp" && snyk test --severity-threshold=high --json-file-output="$json" 2>&1 )
+	(cd "$tmp" && snyk test --severity-threshold=high --json-file-output="$json" 2>&1)
 }
 
 # Dev tooling pulls transitive vulns its upstreams often never fix, so a plain
@@ -226,7 +216,8 @@ fi
 # JSON report into unparsable garbage. Always disable it and write the report
 # straight to a file rather than capturing stdout.
 _pip_audit_json() {
-	local json="$1"; shift
+	local json="$1"
+	shift
 	pip-audit --progress-spinner off --format=json -o "$json" "$@" 2>&1
 }
 
@@ -279,7 +270,7 @@ else
 			fi
 		done
 		_uv_ids="$(printf '%s' "$_uv_ids" | sort -u | sed '/^$/d')"
-		if (( _uv_scanned == 0 )); then
+		if ((_uv_scanned == 0)); then
 			# uv is installed but no venv was scanned: treat as a broken scan, not
 			# a clean one, so a bad path can never masquerade as zero findings.
 			printf '%s\n' "no uv tool venvs found under '$_uv_dir'" >&2
@@ -305,13 +296,13 @@ fi
 
 # ── notify ────────────────────────────────────────────────────────────────────
 # commands.local is not on the systemd unit PATH, so call the sender by path.
-if (( ${#_sec_findings[@]} > 0 )); then
+if ((${#_sec_findings[@]} > 0)); then
 	_pushover="$(dirname "${BASH_SOURCE[0]}")/../commands.local/send-pushover-notification"
 	if [[ -x "$_pushover" ]]; then
 		"$_pushover" \
 			"Nightly audit flagged ${#_sec_findings[@]} scanner(s): ${_sec_findings[*]}. See Obsidian [[Alerts]]." \
-			"⚠️ Security findings" 1 >/dev/null 2>&1 \
-			|| log "WARN: pushover notification failed"
+			"⚠️ Security findings" 1 >/dev/null 2>&1 ||
+			log "WARN: pushover notification failed"
 	else
 		log "WARN: send-pushover-notification not found — ${#_sec_findings[@]} finding(s) not pushed"
 	fi

@@ -15,7 +15,6 @@ function setup_util_yt_dlp() (
 		APT_REPO='ppa:yt-dlp/stable'
 		APT='yt-dlp'     # UBUNTU
 		BREW='yt-dlp'
-		CHOCO='yt-dlp'
 		PKG='yt-dlp'
 		PORT='yt-dlp'
 		SCOOP='yt-dlp'
@@ -44,7 +43,7 @@ function setup_util_yt_dlp() (
 		elif [[ $arch == 'x64' ]]; then
 			__add_download_option 'yt-dlp_linux' || :
 		fi
-	elif is-windows; then
+	elif is-system --windows; then
 		if [[ $arch == 'x64' ]]; then
 			__add_download_option 'yt-dlp.exe' || :
 		elif [[ $arch == 'x32' ]]; then

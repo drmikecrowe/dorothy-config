@@ -22,7 +22,7 @@ function setup_node_global_packages() (
 			Setup global Node.js packages via npm.
 
 			USAGE:
-			setup-node-global-packages [...options] [install|update|setup]
+			setup-node-global-packages [...options] [install|update|setup|configure]
 
 			OPTIONS:
 			--configure
@@ -35,16 +35,25 @@ function setup_node_global_packages() (
 	}
 
 	# process
-	local item option_configure='yes'
+	# option_configure selects how much npm work to do:
+	#   'yes' -- reinstall every configured package (explicit `configure` only)
+	#   ''    -- install just the packages that are missing
+	#   'no'  -- install the missing ones, then update them all
+	local item option_configure=''
 	while [[ $# -ne 0 ]]; do
 		item="$1"
 		shift
 		case "$item" in
 		'--help' | '-h') help ;;
-		# install|update|setup
+		# install|update|setup|configure
 		'setup') ;;
 		'update') option_configure='no' ;;
-		'install') option_configure='yes' ;;
+		# `install` used to force 'yes', which skipped the missing-package
+		# detection below and re-ran `npm install -g` over every configured
+		# package on each `setup-system install`. Installing only what is
+		# actually absent is the point of that detection.
+		'install') option_configure='' ;;
+		'configure') option_configure='yes' ;;
 		'--no-configure'* | '--configure'*) __flag --source={item} --target={option_configure} --affirmative --coerce || return ;;
 		'--'*) help 'An unrecognised flag was provided: ' --variable-value={item} ;;
 		*) help 'An unrecognised argument was provided: ' --variable-value={item} ;;
@@ -87,7 +96,7 @@ function setup_node_global_packages() (
 		local installed_packages=()
 		if [[ $option_configure != 'yes' ]]; then
 			# Get currently installed global packages
-			mapfile -t installed_packages < <(npm list -g --depth=0 2>/dev/null | grep -E '^[├└]' | awk '{print $2}' | cut -d@ -f1 || :)
+			mapfile -t installed_packages < <(mise exec node -- npm list -g --depth=0 2>/dev/null | grep -E '^[├└]' | awk '{print $2}' | cut -d@ -f1 || :)
 
 			for pkg in "${SETUP_GLOBAL_NPM_PACKAGES[@]}"; do
 				# Extract package name without version (e.g. @google/gemini-cli@1.2.3 -> @google/gemini-cli)
@@ -107,10 +116,12 @@ function setup_node_global_packages() (
 		fi
 
 		# Use socket npm wrapper when available for supply chain protection.
-		local npm_cmd='npm'
+		# pinned to mise's node: a system npm on PATH would target
+		# /usr/lib/node_modules and fail with EACCES
+		local npm_cmd='mise exec node -- npm'
 		if command -v socket >/dev/null 2>&1; then
 			if [[ -n ${SOCKET_SECURITY_API_KEY:-} ]]; then
-				npm_cmd='socket npm'
+				npm_cmd='socket npm'  # socket resolves npm itself
 			else
 				__print_style --dim='socket installed but SOCKET_SECURITY_API_KEY not set — using plain npm.' || :
 			fi

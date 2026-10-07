@@ -9,7 +9,7 @@ function setup_uv_global_utilities() (
 	source "$DOROTHY/sources/config.sh"
 
 	# setup.bash provides:
-	local UV_INSTALL=()
+	local UV_GLOBAL_TOOLS=()
 	load_dorothy_config 'setup.bash'
 
 	# =====================================
@@ -48,7 +48,7 @@ function setup_uv_global_utilities() (
 		esac
 	done
 
-	if [[ ${#UV_INSTALL[@]} -eq 0 ]]; then
+	if [[ ${#UV_GLOBAL_TOOLS[@]} -eq 0 ]]; then
 		if [[ $option_configure == 'no' ]]; then
 			__print_style --dim='Setup of uv global tools skipped (no packages configured).' || return
 			return 0
@@ -86,14 +86,14 @@ function setup_uv_global_utilities() (
 		uv tool upgrade --all
 	else
 		# Install/reinstall all configured tools
-		for pkg in "${UV_INSTALL[@]}"; do
+		for pkg in "${UV_GLOBAL_TOOLS[@]}"; do
 			uv tool install --upgrade "$pkg"
 		done
 	fi
 
 	# Install any configured tools not yet installed
 	if [[ $option_configure != 'no' ]] || true; then
-		for pkg in "${UV_INSTALL[@]}"; do
+		for pkg in "${UV_GLOBAL_TOOLS[@]}"; do
 			if ! uv tool list 2>/dev/null | awk '{print $1}' | grep -qxF "$pkg"; then
 				uv tool install "$pkg"
 			fi
