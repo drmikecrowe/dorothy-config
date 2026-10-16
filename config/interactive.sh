@@ -28,8 +28,6 @@ load_env_file ~/.config/dorothy/config/environment.env
 # 1password variables
 # load_env_file ~/.config/dorothy/config.local/1password.env
 
-alias gsd='gsd-with-env'
-
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
