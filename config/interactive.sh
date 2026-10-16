@@ -4,6 +4,7 @@
 
 # load the default configuration
 . "$DOROTHY/config/interactive.sh"
+[ -f "$DOROTHY/user/config.local/interactive.sh" ] && . "$DOROTHY/user/config.local/interactive.sh"
 
 # Loaded by `interactive.sh`
 # Must be compatible with fish, zsh, bash
