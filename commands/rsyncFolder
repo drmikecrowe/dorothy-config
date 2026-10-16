@@ -69,8 +69,14 @@ function rsync_folder() (
 	fi
 	mkdir -p "$option_destination"
 
+	# macOS ships openrsync, which rejects --info=progress2
+	local progress_args=()
+	if ! is-system --macos; then
+		progress_args+=(--info=progress2)
+	fi
+
 	# Perform rsync
-	rsync -armR --info=progress2 \
+	rsync -armR "${progress_args[@]}" \
 		--exclude='.esbuild' \
 		--exclude='.jest' \
 		--exclude='.history' \
