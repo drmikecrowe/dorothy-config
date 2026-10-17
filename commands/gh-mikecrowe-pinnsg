@@ -1,0 +1,5 @@
+#!/bin/bash
+
+GH_TOKEN="$(gh auth token --hostname github.com --user mikecrowe-pinnsg)" || exit
+export GH_TOKEN
+exec gh "$@"
