@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Dorothy Command: new-worktree
+# Purpose: create a sibling worktree for <branch> (existing or new), copy local files, register with Gortex
+# Usage: new-worktree <branch>   (run from any worktree of the repo)
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $(basename "$0") <branch>" >&2
+    echo "Checks out <branch> (local, origin/<branch>, or new from HEAD) into a sibling worktree." >&2
+    exit 1
+fi
+branch="$1"
+
+common="$(git rev-parse --path-format=absolute --git-common-dir)"
+
+# Trunk = the worktree holding the default branch; source of local files and the Gortex index.
+default="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+default="${default#origin/}"
+trunk="$(git worktree list --porcelain | awk -v b="branch refs/heads/$default" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
+trunk="${trunk:-$(git rev-parse --show-toplevel)}"
+
+# Bare layout (<root>/.bare): <root>/<branch>. Plain clone: <repo>/.worktrees/<branch>, kept out of git status.
+name="$(printf %s "$branch" | tr / -)"
+if [[ "$(git config --file "$common/config" --bool core.bare 2>/dev/null)" == true ]]; then
+    dest="$(dirname "$common")/$name"
+else
+    root="$(dirname "$common")"
+    dest="$root/.worktrees/$name"
+    if ! git -C "$root" check-ignore -q .worktrees/; then
+        mkdir -p "$common/info"
+        echo ".worktrees/" >>"$common/info/exclude"
+        echo "added .worktrees/ to $common/info/exclude"
+    fi
+fi
+if [[ -e "$dest" ]]; then
+    echo "ERROR: $dest already exists." >&2
+    exit 1
+fi
+
+git fetch --quiet origin "$branch" 2>/dev/null || true
+if git show-ref --verify --quiet "refs/heads/$branch" || git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    git worktree add "$dest" "$branch"  # remote-only branches get a tracking branch via git's DWIM
+else
+    git worktree add -b "$branch" "$dest"
+fi
+
+# Copy untracked local files: .env, .env.*, *.local, *.local.* by default, plus any .worktreeinclude patterns.
+{
+    git -C "$trunk" ls-files --others --ignored --exclude-standard --directory | while IFS= read -r f; do
+        [[ "$f" == */ ]] && continue
+        case "${f##*/}" in .env | .env.* | *.local | *.local.*) echo "$f" ;; esac
+    done
+    if [[ -f "$trunk/.worktreeinclude" ]]; then
+        git -C "$trunk" ls-files --others --ignored --exclude-from=.worktreeinclude
+    fi
+} | sort -u | while IFS= read -r f; do
+    if [[ -f "$trunk/$f" && ! -e "$dest/$f" ]]; then
+        mkdir -p "$(dirname "$dest/$f")"
+        cp -p "$trunk/$f" "$dest/$f"
+        echo "copied $f"
+    fi
+done
+
+# Repo-owned list (.worktree-include, read by aoe-sessions too): one path per line, `#` comments, `link <path>` symlinks.
+if [[ -f "$trunk/.worktree-include" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "${line%%#*}" =~ ^[[:space:]]*(link[[:space:]]+)?(.*[^[:space:]])[[:space:]]*$ ]] || continue
+        mode="${BASH_REMATCH[1]}" rel="${BASH_REMATCH[2]%/}"
+        if [[ "$rel" == /* || "/$rel/" == */../* ]]; then
+            echo "WARN: .worktree-include: $rel is not a path inside $trunk; skipped" >&2
+            continue
+        fi
+        [[ -e "$trunk/$rel" && ! -e "$dest/$rel" ]] || continue
+        mkdir -p "$(dirname "$dest/$rel")"
+        if [[ -n "$mode" ]]; then
+            ln -s "$trunk/$rel" "$dest/$rel"
+            echo "linked $rel"
+        else
+            cp -a "$trunk/$rel" "$dest/$rel"
+            echo "copied $rel"
+        fi
+    done <"$trunk/.worktree-include"
+fi
+
+run=()
+if command -v mise >/dev/null && { compgen -G "$dest/*mise*.toml" >/dev/null || [[ -f "$dest/.mise.toml" ]]; }; then
+    (cd "$dest" && mise trust --quiet && mise install)
+    run=(mise exec --) # the worktree's pinned tools, not whatever is on PATH
+fi
+
+# Install dependencies from the root lockfile. Best effort: a failure warns and leaves the worktree in place.
+deps() {
+    echo "installing deps: $*"
+    (cd "$dest" && "${run[@]}" "$@") || echo "WARN: '$*' failed; run it yourself in $dest" >&2
+}
+if [[ -f "$dest/pnpm-lock.yaml" ]]; then
+    deps pnpm install --frozen-lockfile
+elif [[ -f "$dest/package-lock.json" ]]; then
+    deps npm ci
+elif [[ -f "$dest/yarn.lock" ]]; then
+    deps yarn install --immutable
+elif [[ -f "$dest/bun.lock" || -f "$dest/bun.lockb" ]]; then
+    deps bun install --frozen-lockfile
+fi
+if [[ -f "$dest/uv.lock" ]]; then
+    deps uv sync --frozen
+fi
+
+# Let Gortex discover the worktree as an automatic overlay. Never `gortex track` it: that makes a duplicate corpus.
+if command -v gortex >/dev/null; then
+    gortex repos reconcile "$dest" --index "$trunk" >/dev/null 2>&1 || true
+    gortex repos explain-view "$dest" --index "$trunk" 2>/dev/null || true
+    echo "Gortex: start a NEW agent session in $dest; sessions bind to a checkout at start."
+fi
+
+echo "OK: $dest is ready ($(git -C "$dest" branch --show-current))"
