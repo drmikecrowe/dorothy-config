@@ -5,6 +5,8 @@
 # load the default configuration
 . "$DOROTHY/config/interactive.sh"
 [ -f "$DOROTHY/user/config.local/interactive.sh" ] && . "$DOROTHY/user/config.local/interactive.sh"
+# Per-host config, gitignored so it stays on one machine.
+[ -f "$DOROTHY/user/config.local/interactive.$(uname -n).sh" ] && . "$DOROTHY/user/config.local/interactive.$(uname -n).sh"
 
 # Loaded by `interactive.sh`
 # Must be compatible with fish, zsh, bash

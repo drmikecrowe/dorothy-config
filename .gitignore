@@ -12,4 +12,7 @@ commands/.gsd/
 # The decryption key is ~/.strongbox_keyring and is NOT in this repo -- back it
 # up separately or a rebuilt machine cannot read any of this.
 *.local/*.bak
+# Exception: per-host files stay on their machine, unencrypted and uncommitted.
+# config/interactive.sh sources config.local/interactive.$(uname -n).sh.
+config.local/interactive.*.sh
 
