@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Nightly update job: yay -Syu + mise self-update + mise upgrade.
+# Nightly update job: mise + user-level globals + supply chain audit.
+# System packages are NOT upgraded here: `omarchy update` owns them (snapshot,
+# keyring, migrations). This job only reports when that is overdue.
 # Invoked by ~/.config/systemd/user/nightly-updates.timer.
 # Safe to run manually: `nightly-updates`
 
@@ -40,7 +42,7 @@ fi
 
 # ── CLI tools (extras not in SETUP_UTILS) ────────────────────────────────────
 # Removed 2026-09-21. Every tool setup-cli-tools declared is now a pacman/AUR
-# package in config/setup.bash, upgraded by the yay -Syu above. Dorothy core's
+# package in config/setup.bash, upgraded by `omarchy update`. Dorothy core's
 # setup-util built `pacman --sync --upgrade` for its upgrade path -- two pacman
 # operations -- so this step could never upgrade anything anyway, and its cargo
 # fallback silently shadowed the pacman copies. See bevry/dorothy setup-util.
@@ -294,20 +296,56 @@ fi
 # sources found"). snyk above already covers the installed globals. Re-add an
 # osv-scanner step here only for project trees that ship a real lockfile.
 
+# ── pending system packages ───────────────────────────────────────────────────
+# Arch ships updates almost daily, so "updates pending" alone would push every
+# night. Log the pending list always; push only when the last full upgrade is
+# older than this many days.
+_PKG_STALE_DAYS=7
+_pkg_stale_msg=""
+log "==> pending system packages"
+if ! command -v checkupdates >/dev/null; then
+	obs_note "pending packages" "checkupdates not installed (pacman-contrib), skipped."
+else
+	# checkupdates: 0 = updates listed, 2 = none, anything else = it failed
+	_rc=0
+	_pending="$(checkupdates 2>&1)" || _rc=$?
+	_last="$(rg -o '^\[([^]]+)\] \[PACMAN\] starting full system upgrade' -r '$1' /var/log/pacman.log 2>/dev/null | tail -1)"
+	# date -d "" parses as midnight today, so an unknown last upgrade must not reach it.
+	_last_s=0
+	[[ -z "$_last" ]] || _last_s="$(date -d "$_last" +%s 2>/dev/null || echo 0)"
+	_age_days=$((($(date +%s) - _last_s) / 86400))
+	case $_rc in
+	0)
+		_count="$(printf '%s\n' "$_pending" | rg -c .)"
+		printf '### 📦 pending packages\n%s pending, last full upgrade %s (%sd ago).\n```\n%s\n```\n\n' \
+			"$_count" "${_last:-unknown}" "$_age_days" "$(printf '%s' "$_pending" | tail -30)" >>"$_OBS_LOG_FILE"
+		if ((_age_days > _PKG_STALE_DAYS)); then
+			_pkg_stale_msg="$_count package update(s) pending; last full upgrade ${_age_days}d ago. Run \`omarchy update\`."
+			obs_alert "$_pkg_stale_msg"
+		fi
+		;;
+	2) obs_note "pending packages" "Up to date (last full upgrade ${_last:-unknown})." ;;
+	*) obs_alert "checkupdates failed (exit $_rc): $(printf '%s' "$_pending" | tail -3)" ;;
+	esac
+	unset _rc _pending _last _last_s _age_days _count
+fi
+
 # ── notify ────────────────────────────────────────────────────────────────────
 # commands.local is not on the systemd unit PATH, so call the sender by path.
-if ((${#_sec_findings[@]} > 0)); then
-	_pushover="$(dirname "${BASH_SOURCE[0]}")/../commands.local/send-pushover-notification"
+_pushover="$(dirname "${BASH_SOURCE[0]}")/../commands.local/send-pushover-notification"
+push() {
 	if [[ -x "$_pushover" ]]; then
-		"$_pushover" \
-			"Nightly audit flagged ${#_sec_findings[@]} scanner(s): ${_sec_findings[*]}. See Obsidian [[Alerts]]." \
-			"⚠️ Security findings" 1 >/dev/null 2>&1 ||
-			log "WARN: pushover notification failed"
+		"$_pushover" "$1" "$2" "$3" >/dev/null 2>&1 || log "WARN: pushover notification failed"
 	else
-		log "WARN: send-pushover-notification not found — ${#_sec_findings[@]} finding(s) not pushed"
+		log "WARN: send-pushover-notification not found — not pushed: $2"
 	fi
-	unset _pushover
+}
+if ((${#_sec_findings[@]} > 0)); then
+	push "Nightly audit flagged ${#_sec_findings[@]} scanner(s): ${_sec_findings[*]}. See Obsidian [[Alerts]]." \
+		"⚠️ Security findings" 1
 fi
+[[ -z "$_pkg_stale_msg" ]] || push "$_pkg_stale_msg" "📦 System updates overdue" 0
+unset _pushover _pkg_stale_msg
 
 obs_finish
 log "==> done"
