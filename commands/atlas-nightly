@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Dorothy Command: atlas-nightly
+# Purpose: build Atlas from an upstream version branch with chosen open PRs merged, and install the AppImage.
+# https://github.com/pacifio/atlas
+# Invoked by ~/.config/systemd/user/atlas-nightly.timer. Safe to run manually: `atlas-nightly`
+# Pushover on failure, and once when upstream opens a newer version branch than BASE.
+
+set -euo pipefail
+
+BASE=0.4.1
+# A REQUIRED PR that fails to merge fails the run; an OPTIONAL one is skipped.
+REQUIRED=(375 504)
+OPTIONAL=(366 391 410)
+
+UPSTREAM=https://github.com/pacifio/atlas.git
+SRC="$HOME/.cache/atlas-nightly/src"
+STATE="$HOME/.local/state/atlas-nightly"
+NOTIFY="$HOME/.config/dorothy/commands.local/send-pushover-notification"
+INSTALL="$HOME/.local/share/dorothy/user/commands/appimage-manager"
+
+# systemd user units get a bare PATH; bun, node and cargo come from mise.
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+# The shared cargo cache every checkout builds into, so a nightly run reuses its dependencies.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cargo/target}"
+BUNDLE="$CARGO_TARGET_DIR/release/bundle/appimage"
+
+mkdir -p "$STATE"
+LOG="$STATE/$(date +%F).log"
+exec > >(tee -a "$LOG") 2>&1
+
+log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
+notify() { "$NOTIFY" "$1" "$2" >/dev/null || log "WARN: Pushover failed: $2"; }
+
+step=setup
+trap 'rc=$?; ((rc == 0)) || notify "Failed at: $step (exit $rc). Log: $LOG" "Atlas nightly build failed"' EXIT
+
+# Keep two weeks of logs.
+ls -t "$STATE"/*.log 2>/dev/null | tail -n +15 | xargs -r rm -- || true
+
+step=clone
+[[ -d $SRC/.git ]] || git clone "$UPSTREAM" "$SRC"
+cd "$SRC"
+# Local merge commits are never pushed; signing them needs 1Password unlocked at midnight.
+git config commit.gpgsign false
+
+step=fetch
+git fetch --prune origin
+latest=$(git for-each-ref --format='%(refname:lstrip=3)' refs/remotes/origin | awk '/^[0-9]+\.[0-9]+\.[0-9]+$/' | sort -V | tail -1)
+if [[ $latest != "$BASE" && $(printf '%s\n' "$BASE" "$latest" | sort -V | tail -1) == "$latest" && ! -f $STATE/notified-$latest ]]; then
+	notify "Upstream opened version branch $latest. atlas-nightly still builds $BASE: update BASE and PRS." "Atlas nightly: new version branch"
+	touch "$STATE/notified-$latest"
+fi
+
+step="reset to $BASE"
+git checkout --force -B nightly "origin/$BASE"
+git clean -fd
+
+merge_pr() {
+	git fetch origin "+refs/pull/$1/head:refs/heads/pr-$1" &&
+		git merge --no-edit -m "nightly: merge #$1" "pr-$1" ||
+		{
+			git merge --abort 2>/dev/null
+			return 1
+		}
+}
+
+for pr in "${REQUIRED[@]}"; do
+	step="merge required PR #$pr"
+	log "==> $step"
+	merge_pr "$pr"
+done
+
+merged=("${REQUIRED[@]}")
+skipped=()
+for pr in "${OPTIONAL[@]}"; do
+	step="merge optional PR #$pr"
+	log "==> $step"
+	if merge_pr "$pr"; then
+		merged+=("$pr")
+	else
+		log "WARN: skipping PR #$pr, it did not merge"
+		skipped+=("$pr")
+	fi
+done
+
+step="mise trust"
+mise trust --quiet "$SRC/mise.toml"
+
+step="bun install"
+log "==> $step"
+bun install --frozen-lockfile
+
+step=build
+log "==> $step"
+rm -rf "$BUNDLE"
+# Same as `mise run install` in the working checkout.
+NO_STRIP=true bun run build:app:linux --bundles appimage
+
+step="find AppImage"
+appimages=("$BUNDLE"/*.AppImage)
+[[ -f ${appimages[0]} ]]
+
+step=install
+log "==> $step ${appimages[0]}"
+# The AppImage carries no internal name, so without --name the install dir follows the versioned filename.
+"$INSTALL" install "${appimages[0]}" --name Atlas
+
+log "Installed nightly $(git rev-parse --short HEAD): $BASE + PRs ${merged[*]}"
+if ((${#skipped[@]})); then
+	notify "Built without PRs ${skipped[*]}: they did not merge onto $BASE. Log: $LOG" "Atlas nightly: PRs skipped"
+fi
