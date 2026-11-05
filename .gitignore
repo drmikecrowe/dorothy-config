@@ -3,6 +3,8 @@
 .gsd/
 commands/.bg-shell/
 commands/.gsd/
+# Claude Code local settings and agent worktrees
+.claude/
 
 # private config — machine-local, holds literal credentials.
 # NOT ignored: .gitattributes runs these through the strongbox clean filter, so
